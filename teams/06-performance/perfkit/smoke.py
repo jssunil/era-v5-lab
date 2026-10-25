@@ -66,7 +66,7 @@ def main(argv=None):
             err = reconstruction_error(model.tok(x) + model.pos(torch.arange(m.block_size, device=dev)), model.blocks)
         print(f"reversible reconstruction error: {err:.1e}  ({'OK' if err < 1e-3 else 'TOO HIGH'})")
 
-    def step():
+    def step(step_index):
         x, y = ld.next_batch()
         with torch.autocast(dev.type, dtype=dtype):
             loss = model(x, y)[1]
@@ -76,6 +76,10 @@ def main(argv=None):
         else:
             loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["run"]["grad_clip"])
+        opt.set_lr(step_index, a.warmup + a.steps,
+                   schedule=cfg["optim"].get("schedule", "constant"),
+                   warmup_steps=cfg["optim"].get("warmup_steps", 0),
+                   min_lr_ratio=cfg["optim"].get("min_lr_ratio", 0.1))
         opt.step(scaler)
         if scaler:
             scaler.update()
@@ -92,7 +96,7 @@ def main(argv=None):
             start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
             start.record()
         t0 = time.perf_counter()
-        loss = step()
+        loss = step(i)
         if dev.type == "cuda":
             end.record()
             end.synchronize()

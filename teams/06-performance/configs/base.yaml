@@ -38,6 +38,9 @@ optim:
   lr: 0.0006
   muon_lr: 0.02
   weight_decay: 0.0
+  schedule: constant    # constant for timing | cosine for training-quality runs
+  warmup_steps: 0
+  min_lr_ratio: 0.1
 
 bench:
   modes: [clean, layer, trace]

@@ -106,30 +106,16 @@ Precision and batch come from the GPU: bf16 and B=32 on A100 / L4 / H100, fp16 a
 1e-3 (`OK`), loss starting at about ln(131072) = 11.78 and falling, p10 / p90 within a few % of the median,
 `all weights finite: True`.
 
-**6. Where the time goes:** add one override per run, cumulatively; the jump between runs is roughly
-that feature's cost. Use `--steps 20 --warmup 5`.
+**6. Training schedule:** timing runs use a constant learning rate by default. To inspect training
+loss with cosine decay and optional linear warmup, add optimizer overrides; schedule duration follows
+the run's `--steps` plus timing warmup steps.
 
 ```bash
-python -m perfkit.smoke --steps 20 --warmup 5 model.reversible=false
-python -m perfkit.smoke --steps 20 --warmup 5 model.reversible=false optim.name=adamw
-python -m perfkit.smoke --steps 20 --warmup 5 model.reversible=false optim.name=adamw model.embedding=table
-python -m perfkit.smoke --steps 20 --warmup 5 model.reversible=false optim.name=adamw model.embedding=table model.ffn=mlp
+python -m perfkit.smoke --steps 20 --warmup 5 optim.schedule=cosine optim.warmup_steps=3
 ```
 
-**Reference** (A100-SXM4-40GB, torch 2.11, bf16, B=32, T=512, 25 Oct 2026; uncommitted code, a sanity check only)
-
-| Run | Step (median) | Tokens/s | Peak memory |
-|---|---|---|---|
-| lab_small | 448.0 ms | 36,571 | 10.0 GB |
-| lab_small, `model.ce_impl=chunked` | 473.8 ms | 34,580 | 2.0 GB |
-| lab_small, `model.reversible=false` | 330.5 ms | 49,578 | 13.2 GB |
-| base (plain NanoGPT) | 55.5 ms | 295,145 | 10.8 GB |
-
-Cost of each lab feature: Muon ~145 ms, reversible stack ~120 ms, MoE ~115 ms, KE ~7 ms, GQA ~0 ms.
-
-Previous A100 timings used GPT-2 and the old optimizer grouping. They do not apply to this
-configuration and have been removed. Rerun timings with the full Brahmic vocabulary and byte table;
-include the GPU name. The per-part `perfkit.bench` remains a pre-existing stub.
+No timing results are published yet for the Brahmic vocabulary. The per-part `perfkit.bench` remains
+unimplemented; `perfkit.smoke` reports whole-step timing only.
 
 **Colab in one cell** (Runtime → Change runtime type → GPU):
 
