@@ -98,7 +98,8 @@ real Brahmic vocabulary and KE byte table, including special tokens and raw part
 python -m perfkit.smoke                                      # lab model: configs/lab_small.yaml
 python -m perfkit.smoke --config configs/base.yaml          # plain NanoGPT for comparison
 python -m perfkit.smoke --config configs/tiny_cpu.yaml       # laptop, seconds; numbers mean nothing
-python -m perfkit.smoke --batch 16 model.ce_impl=chunked     # if out of memory
+python -m perfkit.smoke model.ce_impl=chunked                # if out of memory; then lower --batch (T4 default is 8)
+python -m perfkit.smoke --steps 500 --warmup 0               # longer training run (every step is a real train step)
 ```
 
 Precision and batch come from the GPU: bf16 and B=32 on A100 / L4 / H100, fp16 and B=8 on T4 / P100 / V100.
@@ -117,18 +118,27 @@ python -m perfkit.smoke --steps 20 --warmup 5 optim.schedule=cosine optim.warmup
 No timing results are published yet for the Brahmic vocabulary. The per-part `perfkit.bench` remains
 unimplemented; `perfkit.smoke` reports whole-step timing only.
 
-**Colab in one cell** (Runtime → Change runtime type → GPU):
+**Colab** (Runtime → Change runtime type → GPU), one cell each so a failing step is easy to see:
 
 ```python
+!nvidia-smi --query-gpu=name,memory.total --format=csv
 !git clone -q <REPO_URL> /content/era-v5-lab
 %cd /content/era-v5-lab
 !git checkout -q g6/dev
 %cd teams/06-performance
 !pip install -q tokenizers datasets pyyaml pytest
-!python -m pytest correctness -q
+```
+```python
 !python -m dataio.prepare_fineweb
+```
+```python
+!python -m pytest correctness -q -rs
+```
+```python
 !python -m perfkit.smoke
 ```
 
+Reference (smoke, A100-SXM4-40GB, bf16, B=32): lab_small 511 ms/step, lab_small with `optim.name=adamw`
+358 ms, base 115 ms; peak memory ~25 GB for all three (mostly the fp32 logits of the 131K vocabulary).
 Use `%cd`, not `!cd` (`!cd` changes the folder for that line only). Colab deletes `/content` and the data
 cache when the session ends.

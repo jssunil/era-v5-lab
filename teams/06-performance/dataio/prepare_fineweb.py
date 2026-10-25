@@ -6,6 +6,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -62,3 +64,7 @@ if __name__ == "__main__":
     ap.add_argument("--tokenizer-path", help="tokenizer.json in a checkout of the source repo")
     a = ap.parse_args()
     prepare(a.out, a.train_shards, a.tokens_per_shard, a.tokenizer_path)
+    # Skip interpreter teardown: pyarrow's global ThreadPool destructor (pulled in by datasets streaming)
+    # can deadlock in exit() and hang the process after every shard is already written.
+    sys.stdout.flush()
+    os._exit(0)

@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT))
 from dataio.loader import Loader  # noqa: E402
 from models.config import load_config, model_config  # noqa: E402
 from models.gpt import GPT  # noqa: E402
-from models.optim import build_optimizer  # noqa: E402
+from models.optim import _native_bf16, build_optimizer  # noqa: E402
 from models.reversible import reconstruction_error  # noqa: E402
 
 
@@ -42,7 +42,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    bf16 = dev.type == "cuda" and torch.cuda.is_bf16_supported()
+    bf16 = dev.type == "cuda" and _native_bf16()          # emulated bf16 (T4 etc.) counts as no
     dtype = torch.bfloat16 if (bf16 or dev.type == "cpu") else torch.float16
     B = a.batch or (32 if bf16 else 8)
     cfg = load_config(a.config, a.overrides)
