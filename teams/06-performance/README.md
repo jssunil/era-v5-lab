@@ -14,13 +14,14 @@ Everything is driven by config: a new model is a new YAML file in `configs/`, no
 
 | Part | Setting |
 |---|---|
-| Data | FineWeb 10B, GPT-2 tokens (`kjj0/fineweb10B-gpt2`), random 512-token windows |
+| Data | Raw FineWeb sample-10BT retokenized with BrahmicTokenizer-131K, random 512-token windows |
+| Tokenizer | [BrahmicTokenizer-131K source repo](https://github.com/theschoolofai/BrahmicTokenizer-131K), exactly 131,072 IDs |
 | Embedding | Kronecker Embedding v1: fixed byte codec (256 x 32 = 8192) + `Linear(8192 -> 256)` |
 | Attention | GQA: 8 query heads, 2 key/value heads, width 256 |
 | MoE | 1 shared + top-2 of 8 routed experts (256 -> 1024 -> 256), bias balancing, fp32 router |
 | Stack | Reversible midpoint, 9 layers, pre-LN inside `f`; the backward rebuilds each layer's input |
-| Optimizer | Muon on the hidden matrices, AdamW on embeddings, head, routers and 1D parameters |
-| Size | 59.2M parameters, 30.6M active per token |
+| Optimizer | Muon on 2D block weights including routers; AdamW on embedding parameters (including KE projection), output head, norm gains and biases |
+| Size | Reported from the selected config at runtime with the full 131,072-token vocabulary |
 
 `configs/base.yaml` on its own is the plain NanoGPT comparison model (table embedding, dense MLP, plain stack, AdamW).
 `configs/tiny_cpu.yaml` is the lab model shrunk for a laptop.
@@ -39,7 +40,7 @@ docs/          PLAN.md (interfaces, what is done and left), PARTS.md (every part
 
 ## Status
 
-- **Done:** the lab model and data pipeline (verified against fp64 references and on an A100), the
+- **Done:** the lab model and data pipeline (earlier GPT-2 version verified on an A100; Brahmic timings pending), the
   timing-marker API with markers in the model, the run JSON format, the test-pair registry, and a smoke test.
   The test files are stubs: each is reported as skipped until its owner writes it.
 - **Left for Gate 1:** the step timer and event recorder, the bench (clean and layer modes), metrics and
@@ -61,7 +62,7 @@ cd era-v5-lab && git checkout g6/dev && cd teams/06-performance
 
 **2. Install.** Laptop (venv outside the repo): `python -m venv ~/.venvs/g6 && source ~/.venvs/g6/bin/activate`,
 then `pip install -r perfkit/requirements.txt`. Colab (torch is already installed, do not reinstall it):
-`pip install -q tiktoken huggingface_hub pyyaml pytest`.
+`pip install -q tokenizers datasets pyyaml pytest`.
 
 **3. Tests** (CPU is fine, ~5 s)
 
@@ -71,12 +72,25 @@ python -m pytest correctness -q -rs              # all pass; unfinished stubs ar
 
 At Gate 1 no skip may be left (`-rs` lists them).
 
-**4. Data:** FineWeb 10B in GPT-2 tokens (`kjj0/fineweb10B-gpt2`), to `~/.cache/era-perf/fineweb10B-gpt2/`.
-Never commit it. For a quick check without it, add `data.source=synthetic` to any command below.
+**4. Tokenizer and data:** the tokenizer is loaded exclusively from `tokenizer.json` in the
+[source repo](https://github.com/theschoolofai/BrahmicTokenizer-131K), pinned to commit
+`7dfcf398172c825c6689ad578e8b484ca5f57bc9` and verified by SHA-256. It is never loaded from
+Hugging Face. The default downloads that GitHub file into `~/.cache/era-perf/BrahmicTokenizer-131K/`.
+For an offline run, clone the source repo and set `data.tokenizer_path=/path/to/BrahmicTokenizer-131K/tokenizer.json`.
+Tests accept the same path via `BRAHMIC_TOKENIZER_PATH`.
+
+Data preparation streams raw text from FineWeb sample-10BT and encodes it with that artifact.
+New shards use uint32 (IDs exceed 65,535) and a tokenizer metadata manifest. Existing GPT-2 shards
+are incompatible and must be prepared again. Data stays outside git, by default in
+`~/.cache/era-perf/fineweb-brahmic131k/`.
 
 ```bash
-python -m dataio.prepare_fineweb                 # val shard + 1 train shard (100M tokens), ~400 MB
+python -m dataio.prepare_fineweb                 # val + 1 train shard, 1M tokens each (~8 MB total)
+# Offline tokenizer: append --tokenizer-path /path/to/source-checkout/tokenizer.json
 ```
+
+For a quick check without FineWeb, add `data.source=synthetic`. Synthetic runs still use the
+real Brahmic vocabulary and KE byte table, including special tokens and raw partial UTF-8 bytes.
 
 **5. Smoke test the model** (not the baseline: Gate 1 numbers come from `perfkit.bench` on committed code)
 
@@ -84,47 +98,47 @@ python -m dataio.prepare_fineweb                 # val shard + 1 train shard (10
 python -m perfkit.smoke                                      # lab model: configs/lab_small.yaml
 python -m perfkit.smoke --config configs/base.yaml          # plain NanoGPT for comparison
 python -m perfkit.smoke --config configs/tiny_cpu.yaml       # laptop, seconds; numbers mean nothing
-python -m perfkit.smoke --batch 16 model.ce_impl=chunked     # if out of memory
+python -m perfkit.smoke model.ce_impl=chunked                # if out of memory; then lower --batch (T4 default is 8)
+python -m perfkit.smoke --steps 500 --warmup 0               # longer training run (every step is a real train step)
 ```
 
 Precision and batch come from the GPU: bf16 and B=32 on A100 / L4 / H100, fp16 and B=8 on T4 / P100 / V100.
 `key=value` overrides work for any key of `configs/base.yaml`. A good run: reconstruction error below
-1e-3 (`OK`), loss starting at about ln(50304) = 10.83 and falling, p10 / p90 within a few % of the median,
+1e-3 (`OK`), loss starting at about ln(131072) = 11.78 and falling, p10 / p90 within a few % of the median,
 `all weights finite: True`.
 
-**6. Where the time goes:** add one override per run, cumulatively; the jump between runs is roughly
-that feature's cost. Use `--steps 20 --warmup 5`.
+**6. Training schedule:** timing runs use a constant learning rate by default. To inspect training
+loss with cosine decay and optional linear warmup, add optimizer overrides; schedule duration follows
+the run's `--steps` plus timing warmup steps.
 
 ```bash
-python -m perfkit.smoke --steps 20 --warmup 5 model.reversible=false
-python -m perfkit.smoke --steps 20 --warmup 5 model.reversible=false optim.name=adamw
-python -m perfkit.smoke --steps 20 --warmup 5 model.reversible=false optim.name=adamw model.embedding=table
-python -m perfkit.smoke --steps 20 --warmup 5 model.reversible=false optim.name=adamw model.embedding=table model.ffn=mlp
+python -m perfkit.smoke --steps 20 --warmup 5 optim.schedule=cosine optim.warmup_steps=3
 ```
 
-**Reference** (A100-SXM4-40GB, torch 2.11, bf16, B=32, T=512, 25 Oct 2026; uncommitted code, a sanity check only)
+No timing results are published yet for the Brahmic vocabulary. The per-part `perfkit.bench` remains
+unimplemented; `perfkit.smoke` reports whole-step timing only.
 
-| Run | Step (median) | Tokens/s | Peak memory |
-|---|---|---|---|
-| lab_small | 448.0 ms | 36,571 | 10.0 GB |
-| lab_small, `model.ce_impl=chunked` | 473.8 ms | 34,580 | 2.0 GB |
-| lab_small, `model.reversible=false` | 330.5 ms | 49,578 | 13.2 GB |
-| base (plain NanoGPT) | 55.5 ms | 295,145 | 10.8 GB |
-
-Cost of each lab feature: Muon ~145 ms, reversible stack ~120 ms, MoE ~115 ms, KE ~7 ms, GQA ~0 ms.
-
-**Colab in one cell** (Runtime → Change runtime type → GPU):
+**Colab** (Runtime → Change runtime type → GPU), one cell each so a failing step is easy to see:
 
 ```python
+!nvidia-smi --query-gpu=name,memory.total --format=csv
 !git clone -q <REPO_URL> /content/era-v5-lab
 %cd /content/era-v5-lab
 !git checkout -q g6/dev
 %cd teams/06-performance
-!pip install -q tiktoken huggingface_hub pyyaml pytest
-!python -m pytest correctness -q
+!pip install -q tokenizers datasets pyyaml pytest
+```
+```python
 !python -m dataio.prepare_fineweb
+```
+```python
+!python -m pytest correctness -q -rs
+```
+```python
 !python -m perfkit.smoke
 ```
 
+Reference (smoke, A100-SXM4-40GB, bf16, B=32): lab_small 511 ms/step, lab_small with `optim.name=adamw`
+358 ms, base 115 ms; peak memory ~25 GB for all three (mostly the fp32 logits of the 131K vocabulary).
 Use `%cd`, not `!cd` (`!cd` changes the folder for that line only). Colab deletes `/content` and the data
 cache when the session ends.

@@ -19,7 +19,7 @@ Modes (upstream names):
     cached   precompute the [V, D] codec table once, forward is an index_select
 Both give the same output. Memory at B=32, T=512: dynamic builds a [16384, 8192] fp32 codec (512 MB,
 plus ~512 MB of z-norm temporaries; 256 MB bf16 saved for backward); cached keeps a [V, D] fp32 table
-(1.65 GB for V = 50304). A sparse path (never building the D-dim codec) is a week-2 fast version:
+(4 GiB for V = 131072). A sparse path (never building the D-dim codec) is a week-2 fast version:
 z-norm of a vector with L entries of 1/sqrt(L) has mean sqrt(L)/D and a closed-form std, so
 W @ z = (W[:, idx].sum / sqrt(L) - mean * W.sum(1)) / std.
 """
@@ -42,39 +42,6 @@ def token_bytes_random(vocab_size: int, max_pos: int = 32, seed: int = 0):
     tb = torch.randint(0, N_BYTES, (vocab_size, max_pos), generator=g, dtype=torch.uint8)
     lens = torch.randint(1, 9, (vocab_size,), generator=g)
     return tb, lens
-
-
-def token_bytes_from_tiktoken(name: str = "gpt2", max_pos: int = 32, vocab_size: int | None = None):
-    """Byte table from a tiktoken encoding. Uses each token's raw bytes (exact, also for tokens that
-    are a partial UTF-8 character; upstream decodes through an HF tokenizer, which turns those into
-    U+FFFD). Tokens longer than max_pos are cut UTF-8-safely when they are valid UTF-8, else at max_pos.
-    Rows past the tokenizer vocab (padding up to vocab_size) get one byte 0."""
-    import tiktoken
-    enc = tiktoken.get_encoding(name)
-    V = vocab_size or enc.n_vocab
-    tb = torch.zeros((V, max_pos), dtype=torch.uint8)
-    lens = torch.ones(V, dtype=torch.int64)
-    for t in range(min(V, enc.n_vocab)):
-        raw = _truncate(enc.decode_single_token_bytes(t), max_pos)
-        tb[t, :len(raw)] = torch.tensor(list(raw), dtype=torch.uint8)
-        lens[t] = len(raw)
-    return tb, lens
-
-
-def _truncate(raw: bytes, max_bytes: int) -> bytes:
-    if len(raw) <= max_bytes:
-        return raw
-    try:
-        raw.decode("utf-8")
-    except UnicodeDecodeError:
-        return raw[:max_bytes]
-    for end in range(max_bytes, max(max_bytes - 4, 0), -1):      # upstream utf8_safe_truncate
-        try:
-            raw[:end].decode("utf-8")
-            return raw[:end]
-        except UnicodeDecodeError:
-            continue
-    return raw[:max_bytes]
 
 
 def kronecker_codec(byte_seqs: torch.Tensor, lens: torch.Tensor, pos_dim: int = 32,

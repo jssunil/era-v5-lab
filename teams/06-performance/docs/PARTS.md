@@ -39,7 +39,7 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 | fp16 grad unscale | `opt.unscale` (2) | | small | |
 | Gradient clipping (global norm) | `opt.clip` (2) | | memory, one reduction | foreach / fused kernel |
 | Muon (Newton-Schulz per matrix) | `opt.muon` (2), `opt.muon.ns` (3) | `optim.muon_impl: loop → batched` | launch (many small matrices) | batch same-shaped matrices with `bmm` |
-| AdamW (1D params) | `opt.adamw` (2) | `fused=True` | small | |
+| AdamW (embedding parameters, output head, norm gains, biases) | `opt.adamw` (2) | `fused=True` | vocabulary-dependent | |
 | zero_grad, MoE bias update | `opt.zero_grad`, `opt.moe_bias` (3) | | tiny | |
 
 ## 2. Around the step (parts of the run, not of the step)

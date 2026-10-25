@@ -154,6 +154,8 @@ class GPT(nn.Module):
         if cfg.embedding == "ke1":
             if token_bytes is None:
                 raise ValueError("embedding=ke1 needs the tokenizer's byte table (token_bytes)")
+            if token_bytes[0].size(0) != cfg.vocab_size or token_bytes[1].size(0) != cfg.vocab_size:
+                raise ValueError("KE byte table must match model.vocab_size")
             from models.ke1 import KroneckerEmbedding
             self.tok = KroneckerEmbedding(token_bytes, d, cfg.ke_max_pos, cfg.ke_mode)
         else:

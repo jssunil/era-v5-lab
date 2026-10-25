@@ -3,7 +3,7 @@
 **Week 1: timing harness, correctness framework, first baseline.**
 
 Scope decisions:
-- **Lab architecture:** GPT-2 tokenizer, FineWeb 10B data (`kjj0/fineweb10B-gpt2`),
+- **Lab architecture:** BrahmicTokenizer-131K from its pinned GitHub source, raw FineWeb sample-10BT retokenized to uint32 shards,
   Kronecker Embedding v1, GQA, MoE with 1 shared + top-2 of 8 routed experts, Muon, reversible midpoint
   stack with pre-LN inside `f` (classic Post-LN cannot be inverted, see `models/gpt.py`). This is `configs/lab_small.yaml`.
 - **Model: NanoGPT, driven only by config.** When G5 (Architecture) sends their config details and
@@ -57,7 +57,7 @@ are interfaces: change them only with the whole team agreeing.
 ```python
 @dataclass
 class ModelConfig:
-    vocab_size: int = 50304      # GPT-2 50257, padded to a multiple of 64
+    vocab_size: int = 131072     # exact BrahmicTokenizer-131K vocabulary
     block_size: int = 512        # sequence length
     n_layer: int = 9
     n_head: int = 8
@@ -170,11 +170,11 @@ docstring has the full MVP, the extras and "done when".
 | `configs/*.yaml` | `base` (every setting; plain NanoGPT on its own), `lab_small` (the lab model), `tiny_cpu` (laptop) | Implemented |
 | `models/config.py` | `ModelConfig`, YAML with `inherit:`, `key=value` overrides; unknown or bad keys fail early | Implemented |
 | `models/gpt.py` | GQA attention, pre-LN blocks, plain or reversible stack, untied head for KE, `ce_impl` torch / chunked loss | Verified against fp64 references and on an A100 |
-| `models/ke1.py` | Kronecker Embedding v1 (ported from theschoolofai/kronecker-embeddings), dynamic and cached modes, GPT-2 byte table | Bit-identical to the upstream package |
+| `models/ke1.py` | Kronecker Embedding v1 (ported from theschoolofai/kronecker-embeddings), dynamic and cached modes, Brahmic source vocabulary byte table | Bit-identical to the upstream package |
 | `models/moe.py` | 1 shared + top-2 of 8 routed experts, fp32 router, bias balancing, loop dispatch, routing replay | Verified against a token-by-token fp64 reference |
 | `models/reversible.py` | Midpoint stack, custom backward (invert, recompute, local backward), `reconstruction_error` | Exact in fp64; bf16 reconstruction 2.5e-4 on an A100 |
-| `models/optim.py` | Muon (hidden matrices) + AdamW (embeddings, head, routers, 1D), Newton-Schulz FLOPs | Implemented, run on an A100 |
-| `dataio/prepare_fineweb.py` | Downloads `kjj0/fineweb10B-gpt2` shards | Tested on Colab |
+| `models/optim.py` | Muon (2D block weights including routers) + AdamW (embedding parameters, head, norm gains, biases), Newton-Schulz FLOPs | Implemented; new optimizer split needs fresh timings |
+| `dataio/prepare_fineweb.py` | Retokenizes raw FineWeb sample-10BT using the pinned GitHub tokenizer; uint32 shards | Brahmic preparation needs fresh validation |
 | `dataio/loader.py` | Random windows from the shards (or synthetic), pinned copy, KE byte table | Run on real shards |
 
 ### Timing harness
@@ -202,7 +202,7 @@ docstring has the full MVP, the extras and "done when".
 | `correctness/framework.py` (checks) | `rel_err`, `check` (outputs + gradients, same random cotangent), `scaled(1.01)` | Stub |
 | `correctness/test_framework.py` | 1.01 on every pair, wrong gradient, NaN, wrong shape must all fail | Stub |
 | `correctness/test_attention.py` | Naive fp64 attention (GQA, both code paths) vs the model's attention | Stub |
-| `correctness/test_ke.py` | KE v1 built byte by byte in fp64 vs `ke1.py`, every mode; GPT-2 byte table | Stub |
+| `correctness/test_ke.py` | KE v1 built byte by byte in fp64 vs `ke1.py`, every mode; Brahmic source vocabulary byte table | Stub |
 | `correctness/test_moe.py` | Token-by-token fp64 MoE vs every dispatch; routing replay (near-tie test); bias balancing | Stub |
 | `correctness/test_reversible.py` | Custom backward vs plain autograd; inversion; bf16 reconstruction property test | Stub |
 
