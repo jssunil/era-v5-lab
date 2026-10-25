@@ -2,6 +2,6 @@ torch>=2.3
 numpy
 pyyaml
 pytest
-tiktoken
-huggingface_hub   # dataio/prepare_fineweb.py
+tokenizers>=0.15
+datasets        # raw FineWeb text only; tokenizer comes exclusively from GitHub
 pynvml          # optional: GPU telemetry

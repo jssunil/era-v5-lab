@@ -23,7 +23,7 @@ CE_IMPLS = ("torch", "chunked")
 
 @dataclass
 class ModelConfig:
-    vocab_size: int = 50304          # GPT-2 50257 padded to a multiple of 64
+    vocab_size: int = 131072         # exact BrahmicTokenizer-131K vocabulary, no padding
     block_size: int = 512            # sequence length T
     n_layer: int = 9
     n_head: int = 8                  # query heads

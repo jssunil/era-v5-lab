@@ -5,7 +5,9 @@
 
 MVP
   1. load_config + model_config; pick the device; seed everything.
-  2. Build Loader (data.source, data.dir), model (models.gpt.GPT with loader.token_bytes(ke_max_pos) when
+  2. Build Loader (data.source, data.dir, data.tokenizer_path, vocab_size=model.vocab_size); validate
+     the pinned GitHub tokenizer's actual vocabulary even for synthetic timing runs. Build model
+     (models.gpt.GPT with loader.token_bytes(ke_max_pos) when
      embedding == "ke1"), optimizer (models.optim.build_optimizer),
      autocast for bf16/fp16, GradScaler for fp16. run.dtype bf16 on a GPU without bf16 (T4 / P100 / V100)
      falls back to fp16 and says so in meta (DECISIONS B3). run.device auto: cuda, else mps, else cpu.

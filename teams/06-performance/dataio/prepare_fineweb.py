@@ -1,39 +1,64 @@
-"""Download FineWeb 10B, already tokenized with GPT-2 (kjj0/fineweb10B-gpt2 on the Hugging Face Hub).  [implemented]
+"""Retokenize raw FineWeb sample-10BT with the pinned GitHub Brahmic artifact.
 
-    python -m dataio.prepare_fineweb                       # val shard + 1 train shard (100M tokens, ~200 MB)
-    python -m dataio.prepare_fineweb --train-shards 4
-
-Shard format (modded-nanogpt): a 1024-byte header of 256 int32 (magic 20240520, version 1, number of
-tokens), then the tokens as uint16. Files: fineweb_val_000000.bin, fineweb_train_000001.bin .. 000103.bin
-(100M tokens each). One train shard is far more than the timing runs read.
-Data stays out of git (pr-guard rejects .bin files).
+uint32 stores all 131,072 IDs. The first shard is validation, followed by train.
 """
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
-REPO = "kjj0/fineweb10B-gpt2"
-DEFAULT_DIR = "~/.cache/era-perf/fineweb10B-gpt2"
+import numpy as np
+
+from dataio.loader import DEFAULT_DIR, MAGIC, VERSION
+from dataio.tokenizer import BrahmicTokenizer, REVISION, SHA256, VOCAB_SIZE
 
 
-def shard_names(train_shards: int):
-    return ["fineweb_val_000000.bin"] + [f"fineweb_train_{i:06d}.bin" for i in range(1, train_shards + 1)]
+def write_shard(path, tokens):
+    tokens = np.asarray(tokens, dtype=np.int64)
+    if tokens.ndim != 1 or not len(tokens) or (tokens < 0).any() or (tokens >= VOCAB_SIZE).any():
+        raise ValueError("Expected nonempty Brahmic token IDs in [0, 131072)")
+    header = np.zeros(256, dtype="<i4")
+    header[:3] = [MAGIC, VERSION, len(tokens)]
+    with Path(path).open("wb") as f:
+        header.tofile(f)
+        tokens.astype("<u4").tofile(f)
 
 
-def prepare(out: str = DEFAULT_DIR, train_shards: int = 1):
-    from huggingface_hub import hf_hub_download
+def prepare(out=DEFAULT_DIR, train_shards=1, tokens_per_shard=1_000_000, tokenizer_path=None):
+    from datasets import load_dataset
+    if train_shards < 1 or not 0 < tokens_per_shard < 2**31:
+        raise ValueError("Need train_shards >= 1 and 0 < tokens_per_shard < 2**31")
+    tokenizer = BrahmicTokenizer(tokenizer_path)
     out = Path(out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
-    for name in shard_names(train_shards):
-        if not (out / name).exists():
-            hf_hub_download(repo_id=REPO, filename=name, repo_type="dataset", local_dir=out)
-        print(out / name)
+    if any(out.glob("fineweb_*.bin")):
+        raise FileExistsError(f"{out} already contains shards; choose a fresh --out directory")
+    meta = {"revision": REVISION, "sha256": SHA256, "vocab_size": tokenizer.vocab_size}
+    docs = load_dataset("HuggingFaceFW/fineweb", name="sample-10BT", split="train", streaming=True)
+    eos = tokenizer.spec["model"]["vocab"]["<|end_of_text|>"]
+    pending, shard = [], 0
+    for doc in docs:
+        pending.extend(tokenizer.encode(doc["text"]) + [eos])
+        while len(pending) >= tokens_per_shard:
+            split = "val" if shard == 0 else "train"
+            path = out / f"fineweb_{split}_{shard:06d}.bin"
+            write_shard(path, pending[:tokens_per_shard])
+            del pending[:tokens_per_shard]
+            print(path)
+            shard += 1
+            if shard > train_shards:
+                # Publish metadata only when the requested dataset is complete.
+                (out / "tokenizer.json.meta").write_text(json.dumps(meta))
+                return
+    raise RuntimeError("Raw FineWeb stream exhausted before requested shards were prepared")
 
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default=DEFAULT_DIR)
-    ap.add_argument("--train-shards", type=int, default=1, help="1..103, 100M tokens each")
+    ap.add_argument("--train-shards", type=int, default=1)
+    ap.add_argument("--tokens-per-shard", type=int, default=1_000_000)
+    ap.add_argument("--tokenizer-path", help="tokenizer.json in a checkout of the source repo")
     a = ap.parse_args()
-    prepare(a.out, a.train_shards)
+    prepare(a.out, a.train_shards, a.tokens_per_shard, a.tokenizer_path)

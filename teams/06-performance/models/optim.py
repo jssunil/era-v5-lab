@@ -1,15 +1,12 @@
 """Optimizers: AdamW, or Muon on every 2D weight + AdamW on the rest.  [implemented: MVP]
 
   * build_optimizer(model, ocfg) -> object with zero_grad(), step(scaler=None), unscale(scaler), flops().
-    ocfg = cfg["optim"]: name adamw | muon, lr, muon_lr, weight_decay, muon_params (hidden | all_2d).
+    ocfg = cfg["optim"]: name adamw | muon, lr, muon_lr, weight_decay.
   * adamw: torch.optim.AdamW (fused=True on CUDA).
   * muon: Muon (Keller Jordan): momentum 0.95 nesterov, update = NS5(momentum grad) * max(1, rows/cols)**0.5,
     Newton-Schulz coefficients (3.4445, -4.7750, 2.0315), 5 steps, bf16 (fp32 on GPUs without bf16: T4/P100/V100).
-    muon_params: hidden (default) = the 2D weights inside the blocks except the MoE routers (attention,
-    experts, shared experts); AdamW for everything else: token / KE projection, position table, LM head,
-    routers, biases, LayerNorm gains. This is Keller Jordan's and Moonlight's split: embeddings and the
-    head are not hidden linear maps, and an orthogonalised router update makes its logits grow fast.
-    all_2d = Muon on every 2D parameter (the first lab assumption).
+    Muon handles 2D block weights (including routers). AdamW handles embedding parameters
+    (token table / KE projection / position table), output head, norm gains and biases.
     An expert that got no tokens has grad None; Muon then steps on its momentum with a zero gradient
     (the true gradient), so its momentum still decays.
   * Regions (level 2): "opt.muon", "opt.adamw"; (level 3): "opt.zero_grad".
@@ -112,19 +109,19 @@ def build_optimizer(model, ocfg: dict):
         return Optimizers([("opt.adamw", torch.optim.AdamW(params, lr=ocfg["lr"], betas=(0.9, 0.95),
                                                           weight_decay=ocfg["weight_decay"], fused=fused))])
     if ocfg["name"] == "muon":
-        scope = ocfg.get("muon_params", "hidden")
-        assert scope in ("hidden", "all_2d"), f"optim.muon_params={scope!r}: hidden | all_2d"
+        if "muon_params" in ocfg and ocfg["muon_params"] != "hidden":
+            raise ValueError("Remove optim.muon_params: embeddings and head must use AdamW")
 
         def use_muon(name, p):
-            if p.dim() < 2:
-                return False
-            return scope == "all_2d" or (name.startswith("blocks.") and ".router." not in name)
+            return p.dim() == 2 and name.startswith("blocks.") and name.endswith(".weight")
         named = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
         two_d = [p for n, p in named if use_muon(n, p)]
         rest = [p for n, p in named if not use_muon(n, p)]
-        named = [("opt.muon", Muon(two_d, lr=ocfg["muon_lr"], weight_decay=ocfg["weight_decay"]))]
+        named = []
+        if two_d:
+            named.append(("opt.muon", Muon(two_d, lr=ocfg["muon_lr"], weight_decay=ocfg["weight_decay"])))
         if rest:
             named.append(("opt.adamw", torch.optim.AdamW(rest, lr=ocfg["lr"], betas=(0.9, 0.95),
-                                                         weight_decay=0.0, fused=fused)))
+                                                         weight_decay=ocfg["weight_decay"], fused=fused)))
         return Optimizers(named)
     raise ValueError(f"optim.name={ocfg['name']!r}: adamw | muon")

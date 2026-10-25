@@ -50,7 +50,9 @@ def main(argv=None):
     print("GPU:", torch.cuda.get_device_name() if dev.type == "cuda" else "cpu", "| torch", torch.__version__,
           "| dtype", dtype, "| B", B, "| T", m.block_size, "| config", Path(a.config).name, *a.overrides)
 
-    ld = Loader(cfg["data"]["source"], B, m.block_size, dev, data_dir=cfg["data"]["dir"], vocab_size=m.vocab_size)
+    ld = Loader(cfg["data"]["source"], B, m.block_size, dev, data_dir=cfg["data"]["dir"], vocab_size=m.vocab_size,
+                tokenizer_path=cfg["data"].get("tokenizer_path"))
+    print(f"tokenizer: BrahmicTokenizer-131K | vocab {ld.vocab_size} | artifact {ld.tokenizer.path}")
     torch.manual_seed(cfg["run"]["seed"])
     model = GPT(m, ld.token_bytes(m.ke_max_pos) if m.embedding == "ke1" else None).to(dev)
     opt = build_optimizer(model, cfg["optim"])

@@ -11,11 +11,12 @@ run:
   grad_clip: 1.0
 
 data:
-  source: fineweb10b    # fineweb10b (kjj0/fineweb10B-gpt2, GPT-2 tokens) | synthetic
-  dir: ~/.cache/era-perf/fineweb10B-gpt2
+  source: fineweb10b    # fineweb10b (raw FineWeb retokenized with BrahmicTokenizer-131K) | synthetic
+  dir: ~/.cache/era-perf/fineweb-brahmic131k
+  tokenizer_path: null # null: pinned GitHub download; or source checkout/tokenizer.json
 
 model:                  # fields of models.config.ModelConfig, nothing else
-  vocab_size: 50304
+  vocab_size: 131072
   block_size: 512
   n_layer: 9
   n_head: 8
@@ -36,7 +37,6 @@ optim:
   name: adamw           # adamw | muon (Muon on every 2D weight, AdamW on the rest)
   lr: 0.0006
   muon_lr: 0.02
-  muon_params: hidden   # hidden (2D weights in the blocks, not routers) | all_2d; the rest use AdamW
   weight_decay: 0.0
 
 bench:
