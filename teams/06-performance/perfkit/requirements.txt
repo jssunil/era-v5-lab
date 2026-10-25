@@ -1,0 +1,7 @@
+torch>=2.3
+numpy
+pyyaml
+pytest
+tiktoken
+huggingface_hub   # dataio/prepare_fineweb.py
+pynvml          # optional: GPU telemetry
