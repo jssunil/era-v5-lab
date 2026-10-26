@@ -185,9 +185,21 @@ def test_stats_of_a_known_list():
     assert s["spread_pct"] == pytest.approx((4.6 - 1.4) / 3 * 100)
 
 
+def test_stats_has_mean_and_std():
+    # Task 2 of the team plan asks for "p50, p90, mean and std". The median stays the number we gate on;
+    # mean and std are extra keys.
+    s = stats([2, 4, 4, 4, 5, 5, 7, 9])
+    assert s["mean"] == pytest.approx(5.0)
+    assert s["std"] == pytest.approx(2.13809, rel=1e-4)      # sample std (n - 1): sqrt(32 / 7)
+    assert stats([7])["std"] == 0.0                          # one value has no spread
+    # One slow step moves the mean but not the median: that is why the 5% check uses the median.
+    spiky = stats([10.0] * 9 + [100.0])
+    assert spiky["median"] == 10.0 and spiky["mean"] == pytest.approx(19.0)
+
+
 def test_stats_of_an_empty_list_has_every_key():
     s = stats([])
-    assert s["n"] == 0 and s["median"] is None
+    assert s["n"] == 0 and s["median"] is None and s["mean"] is None and s["std"] is None
 
 
 # ------------------------------------------------------------------------------ 3. deferred sync (CUDA)

@@ -7,10 +7,17 @@ Examples
     python -m perfkit.bench --config configs/tiny_cpu.yaml                    # laptop: proves it runs (~30 s)
     python -m perfkit.bench --config configs/lab_small.yaml --level 3 --modes clean,layer,trace,checkpoint
     python -m perfkit.bench --config configs/lab_small.yaml --level 3 --against results/runs/<first>.json
+    python -m perfkit.bench --config configs/lab_small.yaml --level 3 --repeat 2   # two runs, fail above 5%
     torchrun --nproc_per_node 2 -m perfkit.bench --config configs/lab_small.yaml --modes comm   # 2+ GPUs
 
 Flags --modes, --level, --steps, --warmup are shortcuts for bench.modes=..., bench.level=..., and so
 on; any key of configs/base.yaml can be overridden as key=value. Every override is written to meta.
+
+--repeat N (Task 2 of G6_Team_Task_Plan.md: "run the benchmark twice and fail if any part differs by more
+than 5%"): run the whole benchmark N times, each from scratch (new model, new loader), write one run JSON
+per run (<tag>.json, <tag>-run2.json, ...) and compare every later run with the first one, exactly as
+--against does. The exit code is 2 when any gated part differs by more than report.tol_pct. These are the
+two runs that baseline_v0.md needs. One GPU only (not under torchrun).
 
 What a run does (the numbered steps of the original stub)
   1. load_config + model_config; device (run.device auto: cuda, else mps, else cpu); seed everything.
@@ -688,6 +695,8 @@ def parse(argv):
     ap.add_argument("--warmup", type=int, default=None, help="warmup steps (= bench.warmup)")
     ap.add_argument("--peak-tflops", type=float, default=None, help="for a GPU not in the peak table")
     ap.add_argument("--against", default=None, help="an earlier run JSON: check every gated part within tol_pct")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="run the benchmark N times and compare each run with the first (exit 2 above tol_pct)")
     ap.add_argument("overrides", nargs="*", help="key=value, e.g. run.batch_size=16 model.vocab_size=131072")
     a = ap.parse_intermixed_args(argv)        # key=value overrides may come before or after the flags
     ov = list(a.overrides)
@@ -699,8 +708,11 @@ def parse(argv):
     return a, ov
 
 
-def main(argv=None):
-    a, overrides = parse(argv)
+def run_once(a, overrides):
+    """One complete benchmark run. Returns (exit code, path of the run JSON or None).
+
+    This is the body of the old main(); it now also returns the path of the JSON it wrote, so --repeat
+    can pass the first run to the later ones as --against."""
     cfg = load_config(a.config, overrides)
     mcfg = model_config(cfg)              # fail early on a bad config
     b = cfg["bench"]
@@ -730,7 +742,7 @@ def main(argv=None):
         rank = dist.get_rank()
         dist.destroy_process_group()
         if rank != 0:
-            return 0
+            return 0, None
         if "comm" not in modes:
             modes.append("comm")
 
@@ -742,7 +754,7 @@ def main(argv=None):
             s = build(cfg, device)
     except FileNotFoundError as e:
         print(f"[bench] {e}\n[bench] or time without the shards: add data.source=synthetic")
-        return 4
+        return 4, None
     tag = a.tag or f"{Path(a.config).stem}_{_slug(M.device_name(device))}_{_dt.datetime.now():%Y%m%d-%H%M%S}"
     meta = run_metadata(s, config_file, overrides, tag)
     print(f"[bench] {meta['gpu']} | {s.dtype} | B={s.loader.B} T={s.loader.T} V={s.mcfg.vocab_size} | "
@@ -802,7 +814,7 @@ def main(argv=None):
         print(f"[bench] out of GPU memory. The fp32 logits alone are {Bn * Tn * V * 4 / 2**30:.1f} GB "
               f"(B={Bn} x T={Tn} x V={V} x 4 bytes), twice that with their gradient.\n"
               f"[bench] try model.ce_impl=chunked, or run.batch_size={max(1, Bn // 2)}")
-        return 3
+        return 3, None
 
     peak, _ = M.peak_tflops(meta["gpu"], s.dtype)
     peak = a.peak_tflops or peak
@@ -849,7 +861,33 @@ def main(argv=None):
         print(f"  {'PASS' if ok else 'FAIL'}")
         if not ok:
             code = code or 2
-    return code
+    return code, path
+
+
+HARD_ERRORS = (1, 3, 4)       # incomplete JSON, out of memory, no data: a repeat cannot compare these
+
+
+def main(argv=None):
+    """One run, or --repeat N runs compared with the first. Returns the exit code (see the module docstring)."""
+    a, overrides = parse(argv)
+    if a.repeat <= 1 or int(os.environ.get("WORLD_SIZE", "1")) > 1:     # torchrun is for --modes comm only
+        return run_once(a, overrides)[0]
+    code, first = run_once(a, overrides)
+    if code in HARD_ERRORS or first is None:
+        return code
+    codes = [code]
+    for k in range(2, a.repeat + 1):
+        again, again_ov = parse(argv)                     # a fresh namespace for every run
+        again.tag = f"{first.stem}-run{k}"                # <tag>-run2, <tag>-run3 ... next to the first JSON
+        again.against = str(first)                        # every later run is checked against the first
+        code, _ = run_once(again, again_ov)
+        codes.append(code)
+        if code in HARD_ERRORS:
+            return code
+    verdict = 2 if 2 in codes else 0
+    # The same word the single run prints for --against, so a log reader finds one verdict per kind of check.
+    print(f"\n[bench] repeat: {a.repeat} runs against {first.name}: {'FAIL' if verdict else 'PASS'}")
+    return verdict
 
 
 def throttle_warnings(busy: dict | None, end: dict | None) -> list:
