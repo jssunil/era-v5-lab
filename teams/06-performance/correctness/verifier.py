@@ -149,7 +149,7 @@ class CorrectnessVerifier:
             print(f"[FAIL] {test_name} ({tag} #{idx}) dtype mismatch: {detail['error']}")
             return False, detail
 
-        atol, rtol = self._tol(ref_c.dtype)
+        atol, rtol = self._tol(fast.dtype)
         m = _metrics(ref_c, fast_c)
         ok = bool(torch.allclose(ref_c, fast_c, atol=atol, rtol=rtol))
         detail = {
