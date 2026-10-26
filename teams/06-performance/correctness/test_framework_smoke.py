@@ -83,3 +83,22 @@ def test_fp8_tol_slots_exist() -> None:
     defaults = CorrectnessVerifier()
     d_atol, d_rtol = defaults._tol_fp8()
     assert d_atol == 1e-1 and d_rtol == 1e-1
+
+
+def test_gold_fp64_uses_bf16_tolerance() -> None:
+    v = CorrectnessVerifier()
+    x = torch.tensor([1.0], dtype=torch.bfloat16)
+
+    # Within bf16 tolerance but outside fp32 tolerance.
+    assert v.verify_forward(
+        lambda value: value,
+        lambda value: value + 0.0078125,
+        (x,), test_name="bf16_gold_within_tol", gold_fp64=True,
+    )
+
+    # A 10% error must fail even with bf16 tolerance.
+    assert not v.verify_forward(
+        lambda value: value,
+        lambda value: value * 1.1,
+        (x,), test_name="bf16_gold_large_error", gold_fp64=True,
+    )

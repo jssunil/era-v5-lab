@@ -203,3 +203,45 @@ def test_tolerances_per_dtype():
     assert not bf16.drill
     with pytest.raises(AssertionError, match="no tolerances"):
         pair("_framework.fp8", dtype=torch.float8_e4m3fn)
+
+
+def _structure_pair(ref_fn, fast_fn):
+    def build(device):
+        x = torch.tensor([1.0], device=device)
+        return Case(ref=ref_fn, fast=fast_fn, inputs=[x], grads=False)
+
+    return Pair("_framework.output_structure", build)
+
+
+def test_output_structure_matching_metadata_passes(device):
+    p = _structure_pair(lambda x: (x * 2, 3, "ok"),
+                        lambda x: (x * 2, 3, "ok"))
+    assert "out[0]" in check(p, device)
+
+
+def test_output_structure_tensor_vs_none_fails(device):
+    p = _structure_pair(lambda x: (x * 2, None),
+                        lambda x: (x * 2, x * 3))
+    with pytest.raises(AssertionError, match="output type mismatch"):
+        check(p, device)
+
+
+def test_output_structure_tuple_length_mismatch_fails(device):
+    p = _structure_pair(lambda x: (x * 2, 3),
+                        lambda x: (x * 2, 3, 4))
+    with pytest.raises(AssertionError, match="output structure mismatch"):
+        check(p, device)
+
+
+def test_output_structure_metadata_value_mismatch_fails(device):
+    p = _structure_pair(lambda x: (x * 2, 3),
+                        lambda x: (x * 2, 4))
+    with pytest.raises(AssertionError, match="non-tensor output mismatch"):
+        check(p, device)
+
+
+def test_output_structure_list_vs_tuple_fails(device):
+    p = _structure_pair(lambda x: [x * 2, 3],
+                        lambda x: (x * 2, 3))
+    with pytest.raises(AssertionError, match="output structure mismatch"):
+        check(p, device)
