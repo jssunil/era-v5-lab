@@ -1,12 +1,139 @@
-"""Attention: models.gpt.GQAttention against a naive fp64 attention.  [STUB]
+"""Attention: models.gpt.GQAttention against a naive fp64 attention.
 
-Reference (write it yourself, from the definition): from the module's c_attn / c_proj weights,
-q, k, v (GQA: k, v have n_kv_head heads; query head h uses kv head h // (n_head / n_kv_head)) -> softmax(q k^T / sqrt(d_head) + causal mask) v -> c_proj. Register @pair("attention.causal").
-Check outputs and gradients (input and all parameters). Try a T that is not a power of 2 (e.g. 37), and n_kv_head in {n_head, n_head/2, 1}.
-Cover both GQA code paths: SDPA enable_gqa (torch >= 2.5) and the repeat_interleave fallback (monkeypatch
-models.gpt._SDPA_GQA = False).
+Reference (written from the definition, never by calling the fast code): from the module's c_attn / c_proj weights,
+q, k, v (GQA: k, v have n_kv_head heads; query head h uses kv head h // (n_head / n_kv_head)) ->
+softmax(q k^T / sqrt(d_head) + causal mask) v -> c_proj. One loop iteration per query head, an explicit mask and
+an explicit softmax: no F.scaled_dot_product_attention and no repeat_interleave.
+
+Pairs (fast fp32 vs reference fp64; outputs, the input gradient and all parameter gradients):
+  attention.causal              n_kv_head = n_head / 2, SDPA enable_gqa path
+  attention.causal.mha          n_kv_head = n_head      (plain multi-head)
+  attention.causal.mqa          n_kv_head = 1, SDPA enable_gqa path
+  attention.causal.fallback     n_kv_head = n_head / 2, repeat_interleave path (models.gpt._SDPA_GQA = False)
+  attention.causal.mqa_fallback n_kv_head = 1, repeat_interleave path
+T = 37 is not a power of 2. Weights and biases are random and large enough that the softmax is not uniform, so
+the bias terms and the mask matter.
+
+Property tests (no pair): causality (a change in the future leaves the past unchanged), and the two GQA code
+paths agree with each other.
 """
+from __future__ import annotations
+
+import math
+
+import pytest
+import torch
+
+import models.gpt as gpt
+from correctness.framework import PAIRS, Case, check, pair, pairs_in, scaled, to64
+from models.config import ModelConfig
+from models.gpt import GQAttention
+
+N_HEAD, N_EMBD, B, T = 8, 64, 2, 37
+WEIGHT_STD, BIAS_STD = 0.15, 0.1
 
 
-def test_todo():
-    raise NotImplementedError("test_attention.py")
+def naive_attention(x, w_attn, b_attn, w_proj, b_proj, n_head, n_kv_head):
+    """Reference attention from the definition. x: [B, T, C]; all tensors fp64."""
+    Bsz, Tn, C = x.shape
+    hd = C // n_head
+    group = n_head // n_kv_head
+    qkv = x @ w_attn.T + b_attn
+    q = qkv[..., :C]
+    k = qkv[..., C:C + n_kv_head * hd]
+    v = qkv[..., C + n_kv_head * hd:]
+    future = torch.triu(torch.ones(Tn, Tn, dtype=torch.bool, device=x.device), diagonal=1)
+    heads = []
+    for h in range(n_head):
+        g = h // group                                   # the kv head this query head reads
+        qh, kh, vh = q[..., h * hd:(h + 1) * hd], k[..., g * hd:(g + 1) * hd], v[..., g * hd:(g + 1) * hd]
+        scores = (qh @ kh.transpose(-1, -2)) / math.sqrt(hd)
+        scores = scores.masked_fill(future, float("-inf"))
+        heads.append(torch.softmax(scores, dim=-1) @ vh)
+    return torch.cat(heads, dim=-1) @ w_proj.T + b_proj
+
+
+def _module(n_kv_head, seed=0):
+    cfg = ModelConfig(n_head=N_HEAD, n_kv_head=n_kv_head, n_embd=N_EMBD)
+    mod = GQAttention(cfg, "attn")
+    g = torch.Generator().manual_seed(seed)
+    with torch.no_grad():
+        for name, p in mod.named_parameters():
+            p.copy_(torch.randn(p.shape, generator=g) * (WEIGHT_STD if name.endswith("weight") else BIAS_STD))
+    return mod
+
+
+def _with_sdpa_gqa(flag, fn):
+    """Run fn() with models.gpt._SDPA_GQA forced to flag (restored afterwards)."""
+    old = gpt._SDPA_GQA
+    gpt._SDPA_GQA = flag
+    try:
+        return fn()
+    finally:
+        gpt._SDPA_GQA = old
+
+
+def _register(name, n_kv_head, sdpa_gqa):
+    @pair(name, tol=1e-5, grad_tol=1e-4)
+    def build(device):
+        if sdpa_gqa and n_kv_head != N_HEAD and not gpt._SDPA_GQA:
+            pytest.skip("SDPA enable_gqa needs torch >= 2.5")
+        fast_mod = _module(n_kv_head).to(device)
+        ref_mod = to64(fast_mod)
+        x = torch.randn(B, T, N_EMBD, device=device, generator=torch.Generator(device=device).manual_seed(1))
+
+        def fast(inp):
+            return _with_sdpa_gqa(sdpa_gqa, lambda: fast_mod(inp))
+
+        def ref(inp):
+            return naive_attention(inp, ref_mod.c_attn.weight, ref_mod.c_attn.bias,
+                                   ref_mod.c_proj.weight, ref_mod.c_proj.bias, N_HEAD, n_kv_head)
+
+        params = lambda m: [m.c_attn.weight, m.c_attn.bias, m.c_proj.weight, m.c_proj.bias]
+        return Case(ref=ref, fast=fast, inputs=[x], params_ref=params(ref_mod), params_fast=params(fast_mod))
+    return build
+
+
+_register("attention.causal", N_HEAD // 2, sdpa_gqa=True)
+_register("attention.causal.mha", N_HEAD, sdpa_gqa=True)
+_register("attention.causal.mqa", 1, sdpa_gqa=True)
+_register("attention.causal.fallback", N_HEAD // 2, sdpa_gqa=False)
+_register("attention.causal.mqa_fallback", 1, sdpa_gqa=False)
+
+
+@pytest.mark.parametrize("name", pairs_in(__name__))
+def test_pair(name, device):
+    errors = check(PAIRS[name], device)
+    assert errors, f"{name}: check returned no errors, nothing was compared"
+
+
+@pytest.mark.parametrize("name", pairs_in(__name__))
+def test_pair_catches_1p01(name, device):
+    with pytest.raises(AssertionError):
+        check(PAIRS[name], device, fast_override=scaled(1.01))
+
+
+@pytest.mark.parametrize("n_kv_head", [N_HEAD, N_HEAD // 2, 1])
+def test_causal(n_kv_head, device):
+    mod = _module(n_kv_head).to(device)
+    x = torch.randn(B, T, N_EMBD, device=device)
+    cut = 20
+    x2 = x.clone()
+    x2[:, cut:] += torch.randn_like(x2[:, cut:])
+    with torch.no_grad():
+        y, y2 = mod(x), mod(x2)
+    assert torch.equal(y[:, :cut], y2[:, :cut]) or (y[:, :cut] - y2[:, :cut]).abs().max() < 1e-6, \
+        "output before the change moved: attention is not causal"
+    assert (y[:, cut:] - y2[:, cut:]).abs().max() > 1e-3, "the change had no effect after the cut"
+
+
+@pytest.mark.parametrize("n_kv_head", [N_HEAD // 2, 1])
+def test_gqa_paths_agree(n_kv_head, device):
+    if not gpt._SDPA_GQA:
+        pytest.skip("SDPA enable_gqa needs torch >= 2.5")
+    mod = _module(n_kv_head).to(device)
+    x = torch.randn(B, T, N_EMBD, device=device)
+    with torch.no_grad():
+        a = _with_sdpa_gqa(True, lambda: mod(x))
+        b = _with_sdpa_gqa(False, lambda: mod(x))
+    assert (a - b).norm() / b.norm() < 1e-5
