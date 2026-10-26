@@ -16,6 +16,8 @@ Pairs (fast fp32 vs reference fp64; outputs, the input gradient and all paramete
 T = 37 is not a power of 2. Weights and biases are random and large enough that the softmax is not uniform, so
 the bias terms and the mask matter.
 
+The 1.01 drill for every pair runs in test_framework.py (test_every_registered_pair_scaled_fails).
+
 Property tests (no pair): causality on both GQA code paths (a change in the future leaves the past unchanged),
 and the two GQA code paths agree with each other.
 
@@ -30,7 +32,7 @@ import pytest
 import torch
 
 import models.gpt as gpt
-from correctness.framework import PAIRS, Case, check, pair, pairs_in, scaled, to64
+from correctness.framework import PAIRS, Case, check, pair, pairs_in, rel_err, to64
 from models.config import ModelConfig
 from models.gpt import GQAttention
 
@@ -114,12 +116,6 @@ def test_pair(name, device):
     assert errors, f"{name}: check returned no errors, nothing was compared"
 
 
-@pytest.mark.parametrize("name", pairs_in(__name__))
-def test_pair_catches_1p01(name, device):
-    with pytest.raises(AssertionError):
-        check(PAIRS[name], device, fast_override=scaled(1.01))
-
-
 @pytest.mark.parametrize("sdpa_gqa", [True, False], ids=["sdpa_gqa", "repeat_interleave"])
 @pytest.mark.parametrize("n_kv_head", [N_HEAD, N_HEAD // 2, N_HEAD // 4, 1])
 def test_causal(n_kv_head, sdpa_gqa, device):
@@ -147,4 +143,4 @@ def test_gqa_paths_agree(n_kv_head, device):
     with torch.no_grad():
         a = _with_sdpa_gqa(True, lambda: mod(x))
         b = _with_sdpa_gqa(False, lambda: mod(x))
-    assert (a - b).norm() / b.norm() < 1e-5
+    assert rel_err(a, b) < 1e-5

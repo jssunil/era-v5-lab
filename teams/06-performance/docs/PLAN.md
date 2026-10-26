@@ -44,7 +44,8 @@ teams/06-performance/
   models/         config.py, gpt.py, moe.py, reversible.py, ke1.py, optim.py
   dataio/         prepare_fineweb.py, loader.py
   perfkit/        timer.py, regions.py, bench.py, metrics.py, report.py, roofline.py, schema.py, smoke.py
-  correctness/    framework.py, test_framework.py, test_attention.py, test_ke.py, test_moe.py, test_reversible.py
+  correctness/    framework.py, test_framework.py, test_attention.py, test_ke.py, test_moe.py, test_reversible.py,
+                  test_model.py
   results/        baseline_v0.md, slowest5_v0.md, runs/
   docs/           PLAN.md, PARTS.md, METRICS.md
 ```
@@ -147,16 +148,21 @@ def _(device):
 ```
 
 - The reference is written **independently** from the definition, in fp64. Never by calling the fast code.
-- Error = `||fast - ref|| / ||ref||` on outputs and gradients. Tolerance below 1e-2 always.
-  (Do not use `torch.allclose` defaults: in bf16 they let a 1% error pass.)
-- `test_framework.py` multiplies every registered fast output by 1.01 and expects a failure.
+- Error = `||fast - ref|| / ||ref||` on outputs and gradients. (Do not use `torch.allclose` defaults: in bf16
+  they let a 1% error pass.)
+- Tolerance per dtype (`TOLERANCES` in `framework.py`, measured on the full lab model): fp32 outputs 1e-5,
+  gradients 5e-5; bf16 outputs 1e-2, gradients 3e-2; fp8 is measured and added when an fp8 path exists.
+  fp32 tolerances are below 1e-2 always.
+- `test_framework.py` multiplies every fp32 pair's fast output by 1.01 and expects a failure (a bf16 tolerance
+  cannot see a 1% error, so bf16 pairs are not in this drill).
+- Each pair's worst error is printed at the end of every pytest run (`conftest.py`).
 
 ---
 
 ### 2.8 The skeleton (what step 0 ships)
 
 Interfaces: `models/config.py`, `perfkit/regions.py` (the API; the recorders were stubs, now in `perfkit/timer.py`), `perfkit/schema.py`
-(run JSON + `example_run()`), `correctness/framework.py` (the pair registry; the checks are stubs),
+(run JSON + `example_run()`), `correctness/framework.py` (the pair registry; the checks were stubs),
 `correctness/conftest.py`.
 
 The lab model, so it runs end to end from day one (MVPs, verified against fp64 references and on an A100):
@@ -208,11 +214,12 @@ docstring has the full MVP, the extras and "done when".
 
 | File | Role | Status |
 |---|---|---|
-| `correctness/framework.py` (registry) | `Case`, `Pair`, `@pair`, `pairs_in`, `to64`; tolerance always < 1e-2 | Implemented |
+| `correctness/framework.py` (registry) | `Case`, `Pair`, `@pair`, `pairs_in`, `to64`; `TOLERANCES` per dtype, fp32 always < 1e-2 | Implemented |
 | `correctness/conftest.py` | `sys.path` (so the Gate command works from the repo root), `device` fixture, stub = skipped | Implemented |
-| `correctness/framework.py` (checks) | `rel_err`, `check` (outputs + gradients, same random cotangent), `scaled(1.01)` | Stub |
-| `correctness/test_framework.py` | 1.01 on every pair, wrong gradient, NaN, wrong shape must all fail | Stub |
-| `correctness/test_attention.py` | Naive fp64 attention (GQA, both code paths) vs the model's attention: 7 pairs, causality, path agreement | Written; the pairs are skipped until `framework.py` checks exist |
+| `correctness/framework.py` (checks) | `rel_err`, `check` (outputs + gradients, same seeded cotangent, one backward per side), `scaled(1.01)`, `RESULTS` error report | Implemented |
+| `correctness/test_framework.py` | 1.01 on every pair, wrong gradient, NaN, wrong shape must all fail | Implemented |
+| `correctness/test_attention.py` | Naive fp64 attention (GQA, both code paths) vs the model's attention: 7 pairs, causality, path agreement | Implemented; 7 pairs pass (errors ~3e-7) |
+| `correctness/test_model.py` | The whole GPT (lab_small, base; fp32 and bf16) vs an fp64 model from the definitions, real Brahmic tokens | Implemented; catches 6 injected model bugs |
 | `correctness/test_ke.py` | KE v1 built byte by byte in fp64 vs `ke1.py`, every mode; Brahmic source vocabulary byte table | Stub |
 | `correctness/test_moe.py` | Token-by-token fp64 MoE vs every dispatch; routing replay (near-tie test); bias balancing | Stub |
 | `correctness/test_reversible.py` | Custom backward vs plain autograd; inversion; bf16 reconstruction property test | Stub |
@@ -220,7 +227,7 @@ docstring has the full MVP, the extras and "done when".
 ### Left for Gate 1, in order
 
 1. ~~`timer.py` and `EventRecorder`, then `bench.py` clean and layer modes, end to end on CPU.~~ Done.
-2. `framework.py` checks and `test_framework.py` (the 1.01 drill), then the four test pairs (attention is written).
+2. ~~`framework.py` checks and `test_framework.py` (the 1.01 drill)~~ Done. Then the test pairs: KE, MoE, reversible (attention is done).
 3. `docs/METRICS.md`, for the G8 hand-off (`metrics.py` is done).
 4. `report.py` with the 5% compare.
 5. Two baseline runs on one GPU, then `results/baseline_v0.md` and `results/slowest5_v0.md`.
