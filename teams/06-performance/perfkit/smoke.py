@@ -28,7 +28,7 @@ sys.path.insert(0, str(ROOT))
 from dataio.loader import Loader  # noqa: E402
 from models.config import load_config, model_config  # noqa: E402
 from models.gpt import GPT  # noqa: E402
-from models.optim import build_optimizer  # noqa: E402
+from models.optim import _native_bf16, build_optimizer  # noqa: E402
 from models.reversible import reconstruction_error  # noqa: E402
 
 
@@ -42,7 +42,7 @@ def main(argv=None):
     a = ap.parse_args(argv)
 
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    bf16 = dev.type == "cuda" and torch.cuda.is_bf16_supported()
+    bf16 = dev.type == "cuda" and _native_bf16()          # emulated bf16 (T4 etc.) counts as no
     dtype = torch.bfloat16 if (bf16 or dev.type == "cpu") else torch.float16
     B = a.batch or (32 if bf16 else 8)
     cfg = load_config(a.config, a.overrides)
@@ -50,7 +50,9 @@ def main(argv=None):
     print("GPU:", torch.cuda.get_device_name() if dev.type == "cuda" else "cpu", "| torch", torch.__version__,
           "| dtype", dtype, "| B", B, "| T", m.block_size, "| config", Path(a.config).name, *a.overrides)
 
-    ld = Loader(cfg["data"]["source"], B, m.block_size, dev, data_dir=cfg["data"]["dir"], vocab_size=m.vocab_size)
+    ld = Loader(cfg["data"]["source"], B, m.block_size, dev, data_dir=cfg["data"]["dir"], vocab_size=m.vocab_size,
+                tokenizer_path=cfg["data"].get("tokenizer_path"))
+    print(f"tokenizer: BrahmicTokenizer-131K | vocab {ld.vocab_size} | artifact {ld.tokenizer.path}")
     torch.manual_seed(cfg["run"]["seed"])
     model = GPT(m, ld.token_bytes(m.ke_max_pos) if m.embedding == "ke1" else None).to(dev)
     opt = build_optimizer(model, cfg["optim"])
@@ -64,7 +66,7 @@ def main(argv=None):
             err = reconstruction_error(model.tok(x) + model.pos(torch.arange(m.block_size, device=dev)), model.blocks)
         print(f"reversible reconstruction error: {err:.1e}  ({'OK' if err < 1e-3 else 'TOO HIGH'})")
 
-    def step():
+    def step(step_index):
         x, y = ld.next_batch()
         with torch.autocast(dev.type, dtype=dtype):
             loss = model(x, y)[1]
@@ -74,6 +76,10 @@ def main(argv=None):
         else:
             loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg["run"]["grad_clip"])
+        opt.set_lr(step_index, a.warmup + a.steps,
+                   schedule=cfg["optim"].get("schedule", "constant"),
+                   warmup_steps=cfg["optim"].get("warmup_steps", 0),
+                   min_lr_ratio=cfg["optim"].get("min_lr_ratio", 0.1))
         opt.step(scaler)
         if scaler:
             scaler.update()
@@ -90,7 +96,7 @@ def main(argv=None):
             start, end = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
             start.record()
         t0 = time.perf_counter()
-        loss = step()
+        loss = step(i)
         if dev.type == "cuda":
             end.record()
             end.synchronize()
