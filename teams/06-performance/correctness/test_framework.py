@@ -203,3 +203,107 @@ def test_tolerances_per_dtype():
     assert not bf16.drill
     with pytest.raises(AssertionError, match="no tolerances"):
         pair("_framework.fp8", dtype=torch.float8_e4m3fn)
+
+
+# ------------------------------------------------------------------------------ determinism (Task 3)
+# "Determinism: running the fast version twice gives identical bits." (G6_Team_Task_Plan.md, Task 3)
+# The parity tolerance (1e-5) cannot see a kernel that is wrong by 1e-9 from run to run, so these toy pairs
+# are wrong by WOBBLE per call: they pass parity and must fail the determinism check.
+# WOBBLE = 1e-6 is chosen on purpose: it is above the fp32 resolution of the values used here (about 5e-7, so
+# the two runs really differ in their bits) and far below the parity tolerance (1e-5 relative), so parity
+# still passes. A smaller wobble such as 1e-9 would be rounded away in fp32 and prove nothing.
+WOBBLE = 1e-6
+
+class _CallCounter:
+    """Counts how often the fast side runs, so a test can tell one run from two."""
+
+    def __init__(self):
+        self.n = 0
+
+
+def _wobbly_pair(counter, *, deterministic=True, wobble_in="output"):
+    """Fast code equals the reference up to a WOBBLE offset that changes on every call."""
+
+    class Noisy(torch.autograd.Function):          # a forward that is exact and a backward that wobbles
+        @staticmethod
+        def forward(ctx, x):
+            return x * 2
+
+        @staticmethod
+        def backward(ctx, g):
+            counter.n += 1
+            return g * 2 + WOBBLE * counter.n
+
+    def build(device):
+        x = torch.randn(4, device=device, dtype=torch.float32, requires_grad=True)
+
+        def fast(a):
+            counter.n += 1
+            if wobble_in == "gradient":
+                return Noisy.apply(a)
+            return a * 2 + WOBBLE * counter.n          # forward output differs between two runs
+
+        return Case(ref=lambda a: a * 2, fast=fast, inputs=[x])
+
+    return Pair("_framework.wobbly", build, deterministic=deterministic)
+
+
+def test_a_wobbly_output_passes_parity_but_fails_determinism(device):
+    p = _wobbly_pair(_CallCounter())
+    with pytest.raises(AssertionError, match="not deterministic"):
+        check(p, device)
+
+
+def test_a_wobbly_gradient_fails_determinism(device):
+    p = _wobbly_pair(_CallCounter(), wobble_in="gradient")
+    with pytest.raises(AssertionError, match=r"grad_in\[0\].*not deterministic"):
+        check(p, device)
+
+
+def test_deterministic_false_opts_out(device):
+    # By design non-deterministic code (for example a CUDA atomic scatter) registers with deterministic=False.
+    p = _wobbly_pair(_CallCounter(), deterministic=False)
+    assert check(p, device)                       # parity still has to pass
+
+
+def test_the_fast_side_runs_twice_when_deterministic_and_once_when_not(device):
+    for deterministic, runs in ((True, 2), (False, 1)):
+        calls = _CallCounter()
+
+        def build(dev, calls=calls):
+            x = torch.randn(4, device=dev, requires_grad=True)
+
+            def fast(a):
+                calls.n += 1
+                return a * 2
+
+            return Case(ref=lambda a: a * 2, fast=fast, inputs=[x], grads=False)
+
+        check(Pair("_framework.runs", build, deterministic=deterministic), device)
+        assert calls.n == runs
+
+
+def test_the_1_01_drill_does_not_run_the_second_pass(device):
+    calls = _CallCounter()
+
+    def build(dev):
+        x = torch.randn(4, device=dev)
+
+        def fast(a):
+            calls.n += 1
+            return a * 2
+
+        return Case(ref=lambda a: a * 2, fast=fast, inputs=[x], grads=False)
+
+    with pytest.raises(AssertionError, match="rel_err"):         # it fails on parity, as the drill expects
+        check(Pair("_framework.drill", build), device, fast_override=scaled(1.01))
+    assert calls.n == 1
+
+
+def test_pair_decorator_passes_deterministic_to_the_registry():
+    @pair("_framework.det_flag", deterministic=False)
+    def _(device):
+        raise NotImplementedError
+
+    assert PAIRS["_framework.det_flag"].deterministic is False
+    assert PAIRS["_framework.toy"].deterministic is True          # the default: every pair is checked
