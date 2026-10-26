@@ -22,7 +22,7 @@ Do not use torch.allclose defaults: in bf16 (rtol 1.6e-2) they let a 1% error pa
 Precision: pairs compare the fast code in fp32 against the fp64 reference, so tol < 1e-2 is easy and the
 1.01 drill bites. bf16 errors are often larger than 1e-2 / 3 (bf16 has 8 mantissa bits), so do NOT make a
 bf16 @pair with a loosened tolerance. Check bf16 behaviour with plain property tests and a stated
-threshold (e.g. reversible reconstruction_error < 1e-3), outside the 1.01 drill. Decision D2.
+threshold (e.g. reversible reconstruction_error < 1e-3), outside the 1.01 drill.
 """
 from __future__ import annotations
 

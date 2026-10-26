@@ -488,11 +488,15 @@ def paired_overhead(seq) -> float | None:
 # ------------------------------------------------------------------------------ trace mode
 
 def profiler_device_events(prof) -> list:
-    """GPU activity (kernels, memcpy, memset) from a finished torch.profiler run: [(name, start_us, end_us)]."""
+    """GPU activity (kernels, memcpy, memset) from a finished torch.profiler run: [(name, start_us, end_us)].
+
+    record_function ranges (our region names, torch's "Optimizer.step#Muon.step") also come back as
+    GPU-side events, spanning the gaps between kernels. They are user annotations, not work: counting
+    them inflated gpu_busy_pct and kernels_per_step and put region names in top_ops."""
     cuda = getattr(torch.autograd.DeviceType, "CUDA", None)
     out = []
     for e in prof.events():
-        if getattr(e, "device_type", None) == cuda:
+        if getattr(e, "device_type", None) == cuda and not getattr(e, "is_user_annotation", False):
             tr = e.time_range
             out.append((e.name, float(tr.start), float(tr.end)))
     return out
@@ -508,7 +512,8 @@ def kernel_summary(device_events, n_steps: int, top: int = 15) -> dict:
 
     gpu_busy_pct = time the GPU runs anything / span from the first to the last activity. Gaps inside
     that span are the GPU waiting for the CPU: launch overhead, host syncs (MoE loop dispatch),
-    Python. (Gaps between steps are not counted: the trace steps are not back to back.)
+    Python. The bench traces steps back to back, so the gaps between steps (the next batch, the
+    optimizer's host work) are counted too: they are idle GPU time a training run really has.
     """
     if not device_events:
         return {"top_ops": [], "gpu_busy_pct": None, "kernels_per_step": 0}

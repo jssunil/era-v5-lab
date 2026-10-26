@@ -41,11 +41,12 @@ docs/          PLAN.md (interfaces, what is done and left), PARTS.md (every part
 ## Status
 
 - **Done:** the lab model and data pipeline (earlier GPT-2 version verified on an A100; Brahmic timings pending), the
-  timing-marker API with markers in the model, the run JSON format, the test-pair registry, and a smoke test.
-  The test files are stubs: each is reported as skipped until its owner writes it.
-- **Left for Gate 1:** the step timer and event recorder, the bench (clean and layer modes), metrics and
-  MFU, the report with the 5% two-run comparison, the correctness checks and the four test pairs, then two
-  baseline runs and `results/baseline_v0.md`, `results/slowest5_v0.md`.
+  timing-marker API with markers in the model, the run JSON format, the test-pair registry, a smoke test, the step
+  timer and event recorders (`perfkit/timer.py`), the bench with clean, layer, trace, checkpoint and comm modes
+  (`perfkit/bench.py`, run on CPU so far), metrics and MFU (`perfkit/metrics.py`), and the attention test pairs.
+- **Left for Gate 1:** the correctness checks in `framework.py` (until then the attention pairs are skipped) and the
+  other three test pairs, the report with the 5% two-run comparison (`bench --against` is a console version),
+  `docs/METRICS.md`, then two baseline runs and `results/baseline_v0.md`, `results/slowest5_v0.md`.
 
 The full table is in [`docs/PLAN.md`](docs/PLAN.md) section 3. Every part we time is in [`docs/PARTS.md`](docs/PARTS.md).
 
@@ -102,7 +103,7 @@ python -m perfkit.smoke model.ce_impl=chunked                # if out of memory;
 python -m perfkit.smoke --steps 500 --warmup 0               # longer training run (every step is a real train step)
 ```
 
-Precision and batch come from the GPU: bf16 and B=32 on A100 / L4 / H100, fp16 and B=8 on T4 / P100 / V100.
+Precision and batch come from the GPU: bf16 and B=32 on A100 / L4 / H100, fp16 and B=8 on T4 / P100 / V100 (the bench uses the same rule through `run.batch_size: auto`).
 `key=value` overrides work for any key of `configs/base.yaml`. A good run: reconstruction error below
 1e-3 (`OK`), loss starting at about ln(131072) = 11.78 and falling, p10 / p90 within a few % of the median,
 `all weights finite: True`.
@@ -115,8 +116,28 @@ the run's `--steps` plus timing warmup steps.
 python -m perfkit.smoke --steps 20 --warmup 5 optim.schedule=cosine optim.warmup_steps=3
 ```
 
-No timing results are published yet for the Brahmic vocabulary. The per-part `perfkit.bench` remains
-unimplemented; `perfkit.smoke` reports whole-step timing only.
+No timing results are published yet for the Brahmic vocabulary.
+
+**7. Bench** (per-part timing; Gate 1 numbers come from here, on committed code)
+
+```bash
+python -m perfkit.bench --config configs/tiny_cpu.yaml                      # laptop: proves it runs; writes to ~/.cache/era-perf/runs-smoke/
+python -m perfkit.bench --config configs/lab_small.yaml --level 3 --tag a                              # first baseline run
+python -m perfkit.bench --config configs/lab_small.yaml --level 3 --tag b --against results/runs/a.json # 5% check
+torchrun --nproc_per_node 2 -m perfkit.bench --config configs/lab_small.yaml --modes comm               # 2+ GPUs
+```
+
+Defaults (`configs/base.yaml`, `bench:`): all modes (clean, layer, trace, checkpoint, comm), 150 measured steps
+after 10 warmup, 10 checkpoint saves after one warm save that is not counted. `run.batch_size: auto` uses the
+same rule as smoke: B=32 where bf16 is native (A100, L4, H100), B=8 otherwise (T4: B=32 runs out of memory);
+the run JSON records the B it used, and `--against` refuses two runs with different B. On one GPU the all-to-all
+is not timed (its payload is recorded); time it under `torchrun` on 2+ GPUs (Kaggle T4 x2). A level-3 run takes
+about 8 minutes on an A100. Run the two baselines back to back in one session.
+
+Each run writes `results/runs/<tag>.json` (the format is in `docs/PLAN.md` 2.6) and prints the parts at level <= 2
+(gated) and the parts inside a block (information only). Read the `[warn]` lines: a dirty tree, the wrong vocabulary,
+recorder overhead above 2% or a throttled GPU make the numbers not count. Exit code 2 means `--against` found a part
+outside 5%.
 
 **Colab** (Runtime → Change runtime type → GPU), one cell each so a failing step is easy to see:
 

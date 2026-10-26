@@ -46,12 +46,12 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 
 | Part | Where it is timed | Why it matters |
 |---|---|---|
-| Startup: imports, model build, init | `goodput.badput.startup` | time to first step (week-4 launch speed check) |
-| `torch.compile` / autotune | `goodput.badput.compile` | once per run, can take minutes |
-| Warmup steps | bench | allocator and autotune settle |
+| Startup: model, data loader and optimizer build | `goodput.badput_s.startup` | time to first step (week-4 launch speed check) |
+| First step, including `torch.compile` / autotune | `goodput.badput_s.first_step` | once per run, can take minutes |
+| Warmup steps | `goodput.badput_s.warmup` | allocator and autotune settle |
 | Logging (`.item()`) | `goodput.badput.logging` | each call is a host sync |
 | Eval | `goodput.badput.eval` | not training time |
-| Checkpoint save (later load / resume) | `checkpoint` part: ms per save, MB | blocks training; later async or sharded |
+| Checkpoint save (later load / resume) | `checkpoint` mode: `save_ms` (= `to_cpu_ms` + `write_ms`), `size_mb` | blocks training; later async or sharded |
 | Tokenizer throughput | `tokenizer` mode | offline, but feeds the data pipeline (G3's tokenizer later) |
 
 ## 3. Measured, but not regions
@@ -69,7 +69,7 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 | Part | Region | Switch |
 |---|---|---|
 | Gradient all-reduce / reduce-scatter (data parallel) | `comm.grad` | `dist.strategy: ddp → fsdp` |
-| MoE expert-parallel all-to-all (dispatch and combine) | `comm.moe_a2a` | `model.moe.parallel: none → ep` |
+| MoE expert-parallel all-to-all (dispatch and combine) | `comm.moe_a2a` (week 1: the payload, timed alone with `--modes comm` under torchrun) | `model.moe.parallel: none → ep` |
 | Communication overlap with backward | `bwd` with and without comm | bucket size |
 | Load imbalance across GPUs and experts | per-rank step time, tokens per expert | balancing settings |
 | Checkpoint sharding | `checkpoint` | `ckpt.mode: sync → async / sharded` |
@@ -79,5 +79,5 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 ## What the skeleton has today
 
 It has the region names for section 1. It does **not** have most of the switches yet (`attn_impl`,
-`ce_impl`, `norm_impl`, `muon_impl`, `data.loader`, `opt.muon.ns`, `opt.unscale`). Adding them now,
-with only `reference` implemented, is decision C6 in `DECISIONS.md`.
+`ce_impl`, `norm_impl`, `muon_impl`, `data.loader`, `opt.muon.ns`, `opt.unscale`). Whether to add them now,
+with only `reference` implemented, is still open.

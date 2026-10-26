@@ -9,13 +9,18 @@ Pairs (fast fp32 vs reference fp64; outputs, the input gradient and all paramete
   attention.causal              n_kv_head = n_head / 2, SDPA enable_gqa path
   attention.causal.mha          n_kv_head = n_head      (plain multi-head)
   attention.causal.mqa          n_kv_head = 1, SDPA enable_gqa path
+  attention.causal.lab          n_kv_head = n_head / 4 (lab_small: 8 query heads share 2 kv heads), SDPA enable_gqa
   attention.causal.fallback     n_kv_head = n_head / 2, repeat_interleave path (models.gpt._SDPA_GQA = False)
   attention.causal.mqa_fallback n_kv_head = 1, repeat_interleave path
+  attention.causal.lab_fallback n_kv_head = n_head / 4, repeat_interleave path
 T = 37 is not a power of 2. Weights and biases are random and large enough that the softmax is not uniform, so
 the bias terms and the mask matter.
 
-Property tests (no pair): causality (a change in the future leaves the past unchanged), and the two GQA code
-paths agree with each other.
+Property tests (no pair): causality on both GQA code paths (a change in the future leaves the past unchanged),
+and the two GQA code paths agree with each other.
+
+The gradient of the k part of c_attn.bias is exactly 0: adding q . b_k to every score of a query shifts its
+softmax row by a constant. That is why errors are taken over whole tensors; a k-bias-only error would be 0 / 0.
 """
 from __future__ import annotations
 
@@ -97,8 +102,10 @@ def _register(name, n_kv_head, sdpa_gqa):
 _register("attention.causal", N_HEAD // 2, sdpa_gqa=True)
 _register("attention.causal.mha", N_HEAD, sdpa_gqa=True)
 _register("attention.causal.mqa", 1, sdpa_gqa=True)
+_register("attention.causal.lab", N_HEAD // 4, sdpa_gqa=True)
 _register("attention.causal.fallback", N_HEAD // 2, sdpa_gqa=False)
 _register("attention.causal.mqa_fallback", 1, sdpa_gqa=False)
+_register("attention.causal.lab_fallback", N_HEAD // 4, sdpa_gqa=False)
 
 
 @pytest.mark.parametrize("name", pairs_in(__name__))
@@ -113,26 +120,30 @@ def test_pair_catches_1p01(name, device):
         check(PAIRS[name], device, fast_override=scaled(1.01))
 
 
-@pytest.mark.parametrize("n_kv_head", [N_HEAD, N_HEAD // 2, 1])
-def test_causal(n_kv_head, device):
+@pytest.mark.parametrize("sdpa_gqa", [True, False], ids=["sdpa_gqa", "repeat_interleave"])
+@pytest.mark.parametrize("n_kv_head", [N_HEAD, N_HEAD // 2, N_HEAD // 4, 1])
+def test_causal(n_kv_head, sdpa_gqa, device):
+    if sdpa_gqa and n_kv_head != N_HEAD and not gpt._SDPA_GQA:
+        pytest.skip("SDPA enable_gqa needs torch >= 2.5")
     mod = _module(n_kv_head).to(device)
-    x = torch.randn(B, T, N_EMBD, device=device)
+    g = torch.Generator(device=device).manual_seed(2)
+    x = torch.randn(B, T, N_EMBD, device=device, generator=g)
     cut = 20
     x2 = x.clone()
-    x2[:, cut:] += torch.randn_like(x2[:, cut:])
+    x2[:, cut:] += torch.randn(x2[:, cut:].shape, device=device, generator=g)
     with torch.no_grad():
-        y, y2 = mod(x), mod(x2)
+        y, y2 = _with_sdpa_gqa(sdpa_gqa, lambda: (mod(x), mod(x2)))
     assert torch.equal(y[:, :cut], y2[:, :cut]) or (y[:, :cut] - y2[:, :cut]).abs().max() < 1e-6, \
         "output before the change moved: attention is not causal"
     assert (y[:, cut:] - y2[:, cut:]).abs().max() > 1e-3, "the change had no effect after the cut"
 
 
-@pytest.mark.parametrize("n_kv_head", [N_HEAD // 2, 1])
+@pytest.mark.parametrize("n_kv_head", [N_HEAD // 2, N_HEAD // 4, 1])
 def test_gqa_paths_agree(n_kv_head, device):
     if not gpt._SDPA_GQA:
         pytest.skip("SDPA enable_gqa needs torch >= 2.5")
     mod = _module(n_kv_head).to(device)
-    x = torch.randn(B, T, N_EMBD, device=device)
+    x = torch.randn(B, T, N_EMBD, device=device, generator=torch.Generator(device=device).manual_seed(3))
     with torch.no_grad():
         a = _with_sdpa_gqa(True, lambda: mod(x))
         b = _with_sdpa_gqa(False, lambda: mod(x))
