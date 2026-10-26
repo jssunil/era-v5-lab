@@ -43,9 +43,9 @@ docs/          PLAN.md (interfaces, what is done and left), PARTS.md (every part
 - **Done:** the lab model and data pipeline (earlier GPT-2 version verified on an A100; Brahmic timings pending), the
   timing-marker API with markers in the model, the run JSON format, the test-pair registry, a smoke test, the step
   timer and event recorders (`perfkit/timer.py`), the bench with clean, layer, trace, checkpoint and comm modes
-  (`perfkit/bench.py`, run on CPU so far), metrics and MFU (`perfkit/metrics.py`), and the attention test pairs.
-- **Left for Gate 1:** the correctness checks in `framework.py` (until then the attention pairs are skipped) and the
-  other three test pairs, the report with the 5% two-run comparison (`bench --against` is a console version),
+  (`perfkit/bench.py`, run on CPU so far), metrics and MFU (`perfkit/metrics.py`), the correctness checks in
+  `framework.py` with the 1.01 drill, and the attention test pairs.
+- **Left for Gate 1:** the other three test pairs (KE, MoE, reversible), the report with the 5% two-run comparison (`bench --against` is a console version),
   `docs/METRICS.md`, then two baseline runs and `results/baseline_v0.md`, `results/slowest5_v0.md`.
 
 The full table is in [`docs/PLAN.md`](docs/PLAN.md) section 3. Every part we time is in [`docs/PARTS.md`](docs/PARTS.md).

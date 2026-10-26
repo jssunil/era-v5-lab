@@ -3,9 +3,13 @@
 Checks, for EVERY registered pair:
 
   * import every correctness/test_*.py so all pairs are registered
-  * for each pair: check(pair, device, fast_override=scaled(1.01)) must raise AssertionError
+  * for each pair below the drill tolerance (every fp32 pair): check(pair, device, fast_override=scaled(1.01))
+    must raise AssertionError
   * a toy pair: correct passes; wrong gradient (x1.01 in backward only) fails; NaN fails; wrong shape fails
   * rel_err(x * 1.01, x) == 0.01
+  * check on model-like cases: two outputs through a backward that may run only once (the reversible stack),
+    a parameter with no gradient on both sides (an MoE expert with no tokens), a detached fast output fails
+  * tolerances: fp32 defaults from TOLERANCES, fp32 >= 1e-2 refused, bf16 pairs are kept out of the drill
 """
 from __future__ import annotations
 
@@ -15,7 +19,7 @@ from pathlib import Path
 import pytest
 import torch
 
-from framework import Case, PAIRS, Pair, check, pair, rel_err, scaled
+from correctness.framework import Case, PAIRS, Pair, check, pair, rel_err, scaled
 
 
 def _import_all_test_modules() -> None:
@@ -129,8 +133,73 @@ def test_wrong_shape_fails(device):
         check(p, device)
 
 
-def test_every_registered_pair_scaled_fails(device):
-    assert PAIRS, "expected at least the toy pair"
-    for name, p in list(PAIRS.items()):
-        with pytest.raises(AssertionError):
-            check(p, device, fast_override=scaled(1.01))
+@pytest.mark.parametrize("name", sorted(n for n, p in PAIRS.items() if p.drill))
+def test_every_registered_pair_scaled_fails(name, device):
+    with pytest.raises(AssertionError):
+        check(PAIRS[name], device, fast_override=scaled(1.01))
+
+
+class _OnceBackward(torch.autograd.Function):
+    """Like ReversibleStack: the backward frees its state, so a second backward fails."""
+
+    @staticmethod
+    def forward(ctx, x):
+        ctx.state = "saved"
+        return x * 2
+
+    @staticmethod
+    def backward(ctx, g):
+        assert ctx.state is not None, "backward ran twice"
+        ctx.state = None
+        return g * 2
+
+
+def test_two_outputs_one_backward(device):
+    def build(dev):
+        def ref_fn(x):
+            y = x * 2
+            return y, y.sum()
+
+        def fast_fn(x):
+            y = _OnceBackward.apply(x)
+            return y, y.sum()
+
+        x = torch.randn(4, device=dev, dtype=torch.float32, requires_grad=True)
+        return Case(ref=ref_fn, fast=fast_fn, inputs=[x])
+
+    errors = check(Pair("_framework.two_outputs", build), device)
+    assert {"out[0]", "out[1]", "grad_in[0]"} <= set(errors)
+
+
+def test_unused_param_has_no_grad_on_both_sides(device):
+    def build(dev):
+        w_fast = torch.randn(3, device=dev, requires_grad=True)
+        unused_fast = torch.randn(3, device=dev, requires_grad=True)
+        w_ref, unused_ref = (t.detach().double().requires_grad_(True) for t in (w_fast, unused_fast))
+        return Case(ref=lambda x: x * w_ref, fast=lambda x: x * w_fast,
+                    inputs=[torch.randn(3, device=dev)],
+                    params_ref=[w_ref, unused_ref], params_fast=[w_fast, unused_fast])
+
+    errors = check(Pair("_framework.unused_param", build), device)
+    assert "grad_param[0]" in errors and "grad_param[1]" not in errors
+
+
+def test_detached_fast_output_fails(device):
+    def build(dev):
+        x = torch.randn(3, device=dev, requires_grad=True)
+        return Case(ref=lambda x: x * 2, fast=lambda x: (x * 2).detach(), inputs=[x])
+
+    with pytest.raises(AssertionError, match="requires_grad"):
+        check(Pair("_framework.detached", build), device)
+
+
+def test_tolerances_per_dtype():
+    from correctness.framework import TOLERANCES
+    fp32 = Pair("_framework.fp32", _toy_pair)
+    assert (fp32.tol, fp32.gtol) == TOLERANCES[torch.float32] and fp32.drill
+    with pytest.raises(AssertionError, match="fp32 tolerance"):
+        pair("_framework.too_loose", tol=1e-2)
+    bf16 = Pair("_framework.bf16", _toy_pair, *TOLERANCES[torch.bfloat16], dtype=torch.bfloat16)
+    assert not bf16.drill
+    with pytest.raises(AssertionError, match="no tolerances"):
+        pair("_framework.fp8", dtype=torch.float8_e4m3fn)

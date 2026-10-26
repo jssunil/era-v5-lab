@@ -7,7 +7,7 @@ from contextlib import redirect_stdout
 
 import torch
 
-from verifier import CorrectnessVerifier, make_perturbed_fn
+from correctness.verifier import CorrectnessVerifier, make_perturbed_fn
 
 
 def _linear_ref(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
