@@ -1,7 +1,8 @@
-"""Named timing regions that cost nothing when timing is off.  [CONTRACT implemented; recorders STUB]
+"""Named timing regions that cost nothing when timing is off.  [CONTRACT implemented]
 
 The module-level API (region / phase / point / mark / use_recorder) is the contract every
-other file uses: do not change its signatures. The two recorders below are still to be written.
+other file uses: do not change its signatures. The recorders that implement the protocol below
+(EventRecorder, ProfilerRecorder) live in perfkit/timer.py and are re-exported at the end of this file.
 
 Model code:
     with region("block3.attn", level=2):   ...        # a named piece of work
@@ -92,38 +93,6 @@ class _Mark(torch.autograd.Function):
 
 # ------------------------------------------------------------------------------ recorders
 
-class EventRecorder:
-    """Layer mode. MVP: on CUDA record a torch.cuda.Event at each region start/end and point
-    (no sync); on CPU use time.perf_counter. collect() synchronizes ONCE after the step and returns
-        spans:  [(full_name, level, ms)]
-        points: [(name, level, clock)] in backward order, where clock.ms_since(other_clock) works.
-    Overhead is a few microseconds of CPU per event and ~0 GPU."""
-
-    def __init__(self, device: torch.device, max_level: int = 2):
-        self.max_level = max_level
-        raise NotImplementedError("EventRecorder")
-
-    def region(self, name, level=2):
-        raise NotImplementedError
-
-    def point(self, name, level=1):
-        raise NotImplementedError
-
-    def collect(self):
-        raise NotImplementedError
-
-
-class ProfilerRecorder:
-    """Trace mode. MVP: region() opens torch.profiler.record_function(name) (+ NVTX range on CUDA);
-    point() records a zero-length record_function named f"__point__:{name}" so trace tools can
-    cut backward segments."""
-
-    def __init__(self, max_level: int = 3):
-        self.max_level = max_level
-        raise NotImplementedError("ProfilerRecorder")
-
-    def region(self, name, level=2):
-        raise NotImplementedError
-
-    def point(self, name, level=1):
-        raise NotImplementedError
+# The recorders are written in perfkit/timer.py (EventRecorder: layer mode, ProfilerRecorder: trace mode),
+# next to the timing code they share. Re-exported here so `from perfkit.regions import EventRecorder` keeps working.
+from perfkit.timer import EventRecorder, ProfilerRecorder  # noqa: E402,F401

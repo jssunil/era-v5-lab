@@ -5,7 +5,7 @@
 run:
   device: auto          # auto | cuda | cpu | mps
   dtype: bf16           # bf16 | fp16 (T4 / P100 / V100) | fp32
-  batch_size: 32
+  batch_size: auto      # auto: 32 with native bf16 (A100 / L4 / H100), else 8 (T4 / P100 / V100, CPU); or a number
   seed: 0
   compile: false
   grad_clip: 1.0
@@ -43,11 +43,12 @@ optim:
   min_lr_ratio: 0.1
 
 bench:
-  modes: [clean, layer, trace]
+  modes: [clean, layer, trace, checkpoint, comm]   # rule 3b: checkpoint save and MoE all-to-all are measured parts
   warmup: 10
-  steps: 50
+  steps: 150            # 50 left too little room: two A100 runs drifted ~2.5% on every part
   level: 2              # 1 phases, 2 layers, 3 inside layers
   trace_steps: 3
+  ckpt_repeats: 10      # checkpoint saves timed (after one warm save that is not counted)
   max_overhead_pct: 2.0
   out_dir: results/runs
 

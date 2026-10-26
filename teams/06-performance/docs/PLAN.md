@@ -46,7 +46,7 @@ teams/06-performance/
   perfkit/        timer.py, regions.py, bench.py, metrics.py, report.py, roofline.py, schema.py, smoke.py
   correctness/    framework.py, test_framework.py, test_attention.py, test_ke.py, test_moe.py, test_reversible.py
   results/        baseline_v0.md, slowest5_v0.md, runs/
-  docs/           PLAN.md, PARTS.md, DECISIONS.md, METRICS.md
+  docs/           PLAN.md, PARTS.md, METRICS.md
 ```
 
 Shared files (`config.py`, `regions.py`, `schema.py`, the `framework.py` registry)
@@ -110,15 +110,26 @@ with phase("bwd.recompute"):  ...             # prefix, so recompute is not coun
 ```
 meta:      gpu, gpu_spec, torch, cuda, driver, device, commit, dirty, config_file, overrides, tag, time
            [reconstruction_err]                                  cuda / driver are None on CPU
+           [dtype, dtype_requested, notes, batch_size, seq_len, tokens_per_step, vocab_size, data_source,
+            tokenizer {name, revision, sha256, vocab_size}, lr_schedule, python, bench_version, timing,
+            loss_after_first_step, loss_end, compute_capability, sm_count, gpu_mem_gb, gpu_count,
+            telemetry_start, telemetry {after_warmup, end}]
 config:    run, data, model, optim, bench                        the full merged config
-clean:     step_ms {median,p10,p90,iqr,n}, data_ms {median,p10,p90,iqr,n}
+clean:     step_ms {median,p10,p90,iqr,n}, data_ms {median,p10,p90,iqr,n}       [raw_step_ms]
 layer:     level, overhead_pct, step_ms, step_ms_recorder_off,
-           regions { "<phase>:<name>": {median,p10,p90,iqr,n,level,calls_per_step} }
+           regions { "<phase>:<name>": {median,p10,p90,iqr,n,level,calls_per_step} }  [each region: pass]
+           [data_host_ms, data_note, events_per_step, steps, events_created_while_measuring,
+            inner_pass {level, overhead_pct, step_ms, step_ms_recorder_off, events_per_step}]
 trace:     trace_file, top_ops, gpu_busy_pct, kernels_per_step   [parts { "<name>": {file, top_kernels} }]
+           [steps, host_syncs_per_step, sync_sites]
 metrics:   tokens_per_step, tokens_per_s, mfu, params_total, params_active, model_flops_per_token,
-           peak_tflops                                           [hfu, hw_flops_per_token]
+           peak_tflops                                           [hfu, hw_flops_per_token, model_tflops_per_s]
 [memory]:  peak_allocated_gb, peak_reserved_gb
-[goodput]: time_goodput, token_goodput_per_s, badput_s {...}, telemetry {...}
+[goodput]: badput_s {startup, first_step, warmup}                [time_goodput, token_goodput_per_s: to write]
+[checkpoint]: save_ms, to_cpu_ms, write_ms {stats}, size_mb, write_mb_per_s, level, repeats, where
+[comm]:    moe_a2a {bytes_per_call, payload_mb_per_call, payload_dtype, calls_per_layer, calls_per_step, dtype,
+           level, measured, [reason] | [world_size, backend, per_call_ms, per_call_ms_slowest_rank, per_step_ms]}
+[warnings]: ["..."]                                               rule checks and noisy parts, in words
 ```
 
 `perfkit/schema.py` (`REQUIRED`, `REGION_KEYS`) is the source of truth; this is a copy. `[...]` = optional.
@@ -144,7 +155,7 @@ def _(device):
 
 ### 2.8 The skeleton (what step 0 ships)
 
-Interfaces: `models/config.py`, `perfkit/regions.py` (the API; the recorders are stubs), `perfkit/schema.py`
+Interfaces: `models/config.py`, `perfkit/regions.py` (the API; the recorders were stubs, now in `perfkit/timer.py`), `perfkit/schema.py`
 (run JSON + `example_run()`), `correctness/framework.py` (the pair registry; the checks are stubs),
 `correctness/conftest.py`.
 
@@ -183,11 +194,11 @@ docstring has the full MVP, the extras and "done when".
 |---|---|---|
 | `perfkit/regions.py` (API) | `region(name, level)` marks a piece of work. `mark(x, name)` marks where the backward reaches a tensor. `phase("bwd.recompute")` prefixes names. When timing is off, these cost nothing. | Implemented |
 | Markers in the model | `gpt.py`, `moe.py`, `ke1.py`, `reversible.py`, `optim.py` already call `region` and `mark` with the names in `PARTS.md` | In place |
-| `perfkit/regions.py` (recorders) | `EventRecorder`: puts a CUDA event at each region and syncs once after the step. `ProfilerRecorder`: trace mode. | Stub |
-| `perfkit/timer.py` | `StepTimer` (CUDA event pair per step), `stats()` (median, p10, p90, IQR), `sync()` | Stub |
-| `perfkit/bench.py` | The command-line tool: builds the model, warms up, runs clean and layer modes, writes the run JSON | Stub |
+| Recorders (`perfkit/timer.py`, re-exported by `regions.py`) | `EventRecorder`: puts a CUDA event at each region and syncs once after the step. `ProfilerRecorder`: trace mode. | Implemented |
+| `perfkit/timer.py` | `StepTimer` (CUDA event pair per step), `stats()` (median, p10, p90, IQR), `sync()`, backward segments from `mark()` points, per-part aggregation, paired overhead, kernel summary, host-sync count | Implemented; no unit tests of its own yet (run end to end by `test_bench.py`) |
+| `perfkit/bench.py` | The command-line tool: builds the model, warms up, runs clean, layer, trace, checkpoint and comm modes, writes the run JSON, `--against` 5% check | Implemented; run on CPU, GPU runs pending |
 | `perfkit/schema.py` | The run JSON format, with `validate_run` and `example_run` | Implemented |
-| `perfkit/metrics.py` | MFU, memory, GPU name, versions, commit | Stub |
+| `perfkit/metrics.py` | MFU, HFU, peak TFLOPS table, memory, GPU telemetry, GPU name, versions, commit | Implemented (goodput and NVML sampler are extras still to write) |
 | `docs/METRICS.md` | The system metrics and the MFU method, for the G8 hand-off | Not written |
 | `perfkit/report.py` | Markdown report, 5% two-run comparison, the baseline and slowest-5 files | Stub |
 | `perfkit/roofline.py` | Predicts each part's time from FLOPs and bytes (compute / memory / launch bound) | Stub (extra, not needed for Gate 1) |
@@ -201,15 +212,15 @@ docstring has the full MVP, the extras and "done when".
 | `correctness/conftest.py` | `sys.path` (so the Gate command works from the repo root), `device` fixture, stub = skipped | Implemented |
 | `correctness/framework.py` (checks) | `rel_err`, `check` (outputs + gradients, same random cotangent), `scaled(1.01)` | Stub |
 | `correctness/test_framework.py` | 1.01 on every pair, wrong gradient, NaN, wrong shape must all fail | Stub |
-| `correctness/test_attention.py` | Naive fp64 attention (GQA, both code paths) vs the model's attention | Stub |
+| `correctness/test_attention.py` | Naive fp64 attention (GQA, both code paths) vs the model's attention: 7 pairs, causality, path agreement | Written; the pairs are skipped until `framework.py` checks exist |
 | `correctness/test_ke.py` | KE v1 built byte by byte in fp64 vs `ke1.py`, every mode; Brahmic source vocabulary byte table | Stub |
 | `correctness/test_moe.py` | Token-by-token fp64 MoE vs every dispatch; routing replay (near-tie test); bias balancing | Stub |
 | `correctness/test_reversible.py` | Custom backward vs plain autograd; inversion; bf16 reconstruction property test | Stub |
 
 ### Left for Gate 1, in order
 
-1. `timer.py` and `EventRecorder`, then `bench.py` clean and layer modes, end to end on CPU.
-2. `framework.py` checks and `test_framework.py` (the 1.01 drill), then the four test pairs.
-3. `metrics.py` and `docs/METRICS.md`, for the G8 hand-off.
+1. ~~`timer.py` and `EventRecorder`, then `bench.py` clean and layer modes, end to end on CPU.~~ Done.
+2. `framework.py` checks and `test_framework.py` (the 1.01 drill), then the four test pairs (attention is written).
+3. `docs/METRICS.md`, for the G8 hand-off (`metrics.py` is done).
 4. `report.py` with the 5% compare.
 5. Two baseline runs on one GPU, then `results/baseline_v0.md` and `results/slowest5_v0.md`.

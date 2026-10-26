@@ -6,10 +6,14 @@ constructor and attributes as dataio.loader.Loader.
 
   * build: the Loader gets data.tokenizer_path; dtype fallbacks (B3); the LR-schedule note.
   * run metadata: tokenizer revision and sha256, vocab size (rule 1a).
-  * rule_checks: dirty tree, wrong vocabulary (1a), level < 3 (3a), checkpoint / comm not measured (3b).
-  * quick_compare: the 5% check on the whole step and every part at level <= gate_level.
+  * rule_checks: dirty tree, wrong vocabulary (1a), level < 3 (3a), checkpoint / comm not measured (3b; comm
+    only for MoE models).
+  * quick_compare: the 5% check on the whole step and every part at level <= gate_level; refuses runs with a
+    different model, optimizer, compile, grad_clip or data source; a part only one run has is MISSING.
+  * checkpoint: tied weights are copied to the CPU once.
   * write_run / _finite: unique file names, NaN and inf become null.
-  * main: clean + layer + checkpoint run, validate_run returns [], the parts are there, exit codes 0 and 2.
+  * main, for the reversible and the plain stack: clean + layer + checkpoint run, validate_run returns [],
+    the parts are there and add up, exit codes 0 and 2.
 """
 from __future__ import annotations
 
@@ -81,15 +85,37 @@ def test_choose_dtype_fallbacks(monkeypatch):
     assert bench.choose_dtype("fp16", torch.device("cpu"), notes) == "bf16"          # no fp16 autocast on CPU
     assert notes and "bf16" in notes[0]
 
-    monkeypatch.setattr(bench, "native_bf16", lambda: False)                       # T4 / P100 / V100 (DECISIONS B3)
+    monkeypatch.setattr(bench, "native_bf16", lambda: False)                       # T4 / P100 / V100
     notes = []
     assert bench.choose_dtype("bf16", torch.device("cuda"), notes) == "fp16"
-    assert "DECISIONS B3" in notes[0]
+    assert "fp16 + GradScaler" in notes[0]
     monkeypatch.setattr(bench, "native_bf16", lambda: True)
     assert bench.choose_dtype("bf16", torch.device("cuda"), []) == "bf16"
     assert bench.choose_dtype("fp32", torch.device("cpu"), []) == "fp32"
     with pytest.raises(ValueError):
         bench.choose_dtype("fp8", torch.device("cpu"), [])
+
+
+def test_batch_size_auto_follows_the_gpu(monkeypatch):
+    notes = []
+    monkeypatch.setattr(bench, "native_bf16", lambda: True)                        # A100 / L4 / H100
+    assert bench.resolve_batch("auto", torch.device("cuda"), notes) == 32 and "B=32" in notes[0]
+    monkeypatch.setattr(bench, "native_bf16", lambda: False)                       # T4: B=32 does not fit
+    assert bench.resolve_batch("auto", torch.device("cuda")) == 8
+    assert bench.resolve_batch("auto", torch.device("cpu")) == 8
+    assert bench.resolve_batch(16, torch.device("cuda")) == 16                     # a number is kept
+    assert load_config(ROOT / "configs" / "base.yaml")["run"]["batch_size"] == "auto"
+
+
+def test_build_writes_the_resolved_batch_back():
+    s = bench.build(tiny_cfg("run.batch_size=auto"), torch.device("cpu"))
+    assert s.cfg["run"]["batch_size"] == 8 == s.loader.B
+    assert any("run.batch_size=auto" in n for n in s.notes)
+
+
+def test_default_modes_measure_checkpoint_and_comm():
+    b = load_config(ROOT / "configs" / "base.yaml")["bench"]
+    assert {"clean", "layer", "checkpoint", "comm"} <= set(b["modes"]) and b["steps"] >= 150
 
 
 def test_pick_device_cpu_and_missing_cuda(monkeypatch):
@@ -119,8 +145,8 @@ def _checked_run(**meta):
     return run
 
 
-def _cfg(level=3):
-    return {"bench": {"level": level}, "run": {}, "report": {"gate_level": 2}}
+def _cfg(level=3, ffn="moe"):
+    return {"bench": {"level": level}, "run": {}, "model": {"ffn": ffn}, "report": {"gate_level": 2}}
 
 
 def test_rule_checks_clean_run_has_no_warnings():
@@ -140,6 +166,36 @@ def test_rule_checks_flag_each_rule():
     assert "rule 1a" in out and "50304" in out                # wrong vocabulary
     assert "rule 3a" in out                                   # parts inside a block not timed
     assert "rule 3b" in out and "checkpoint and comm" in out  # not measured
+
+
+def test_rule_checks_comm_only_for_moe_models():
+    run = _checked_run()
+    for r in run["layer"]["regions"].values():
+        r["spread_pct"] = 1.0
+    out = "\n".join(bench.rule_checks(run, ["clean", "layer", "checkpoint"], _cfg(ffn="mlp")))
+    assert "rule 3b" not in out                               # a dense model has no all-to-all
+    out = "\n".join(bench.rule_checks(run, ["clean", "layer", "checkpoint"], _cfg(ffn="moe")))
+    assert "rule 3b" in out and "comm" in out
+
+
+_BUSY = {"temperature.gpu": 50.0, "clocks.sm": 1410.0, "clocks.max.sm": 1410.0}
+
+
+def test_throttle_warning_ignores_an_idle_gpu():
+    idle = {**_BUSY, "clocks.sm": 1095.0, "throttle_reasons": 0x1}               # GpuIdle: the Colab A100 case
+    assert bench.throttle_warnings(idle, idle) == []
+    assert bench.throttle_warnings(None, None) == []                             # CPU run
+
+
+def test_throttle_warning_names_the_slowdown():
+    out = bench.throttle_warnings({**_BUSY, "throttle_reasons": 0x4 | 0x40}, None)
+    assert len(out) == 1 and "SwPowerCap" in out[0] and "HwThermalSlowdown" in out[0]
+    assert "C:" in bench.throttle_warnings({**_BUSY, "temperature.gpu": 86.0, "throttle_reasons": 0}, None)[0]
+
+
+def test_throttle_warning_falls_back_to_the_clock_without_reasons():
+    out = bench.throttle_warnings({**_BUSY, "clocks.sm": 1000.0}, None)          # driver gave no reasons
+    assert len(out) == 1 and "no throttle reasons" in out[0]
 
 
 def test_rule_checks_noisy_gated_part_is_named():
@@ -208,6 +264,33 @@ def test_quick_compare_missing_part_is_a_failure():
     assert not ok and {r[0]: r[4] for r in rows}["fwd:block0"] == "MISSING"
 
 
+def test_quick_compare_part_only_in_the_earlier_run_is_missing():
+    a, b = _two_runs()
+    del a["layer"]["regions"]["bwd:embed"]
+    rows, ok, _ = bench.quick_compare(a, b, 5.0, 2)
+    assert not ok and {r[0]: r[4] for r in rows}["bwd:embed"] == "MISSING"
+
+
+def test_quick_compare_zero_ms_parts():
+    a, b = _two_runs()
+    a["layer"]["regions"]["opt:opt.adamw"]["median"] = b["layer"]["regions"]["opt:opt.adamw"]["median"] = 0.0
+    rows, ok, _ = bench.quick_compare(a, b, 5.0, 2)
+    assert ok and {r[0]: r[4] for r in rows}["opt:opt.adamw"] == "ok"        # both 0 ms: they agree
+    b["layer"]["regions"]["opt:opt.adamw"]["median"] = 0.3
+    rows, ok, _ = bench.quick_compare(a, b, 5.0, 2)
+    assert not ok and {r[0]: r[4] for r in rows}["opt:opt.adamw"] == "FAIL"
+
+
+@pytest.mark.parametrize("section, key, value", [("optim", "name", "adamw"), ("run", "compile", True),
+                                                 ("run", "grad_clip", 0.5), ("data", "source", "fineweb"),
+                                                 ("model", "n_layer", 3)])
+def test_quick_compare_refuses_runs_that_do_different_work(section, key, value):
+    a, b = _two_runs()
+    b["config"].setdefault(section, {})[key] = value
+    _, ok, problems = bench.quick_compare(a, b, 5.0, 2)
+    assert not ok and any(section in p for p in problems)
+
+
 def test_quick_compare_includes_checkpoint_and_all_to_all_when_both_have_them():
     a, b = _two_runs()
     for r, ms in ((a, 100.0), (b, 130.0)):
@@ -216,6 +299,42 @@ def test_quick_compare_includes_checkpoint_and_all_to_all_when_both_have_them():
     rows, ok, _ = bench.quick_compare(a, b, 5.0, 2)
     verdict = {r[0]: r[4] for r in rows}
     assert verdict["checkpoint save"] == "FAIL" and verdict["moe all-to-all"] == "FAIL" and not ok
+
+
+# ------------------------------------------------------------------------------ checkpoint
+
+def test_checkpoint_copies_a_tied_weight_once():
+    emb = torch.nn.Embedding(16, 4)
+    head = torch.nn.Linear(4, 16, bias=False)
+    head.weight = emb.weight
+    m = torch.nn.ModuleDict({"tok": emb, "head": head})
+    sd = m.state_dict()
+    assert sd["tok.weight"] is not sd["head.weight"]          # state_dict hands out a new view per key
+    cpu = bench._to_cpu(sd, {})
+    assert cpu["tok.weight"] is cpu["head.weight"]
+    other = bench._to_cpu({"a": torch.zeros(4), "b": torch.zeros(4)}, {})
+    assert other["a"] is not other["b"]                       # equal values, different tensors: two copies
+
+
+# ------------------------------------------------------------------------------ trace
+
+class _Ev:
+    def __init__(self, name, start, end, cuda=True, annotation=False):
+        self.name, self.is_user_annotation = name, annotation
+        self.device_type = torch.autograd.DeviceType.CUDA if cuda else torch.autograd.DeviceType.CPU
+        self.time_range = type("R", (), {"start": start, "end": end})()
+
+
+def test_trace_counts_kernels_not_annotations():
+    from perfkit import timer
+    events = [_Ev("Optimizer.step#Muon.step", 0, 1000, annotation=True),      # spans the idle gap
+              _Ev("opt:opt.muon.ns", 0, 900, annotation=True),
+              _Ev("ampere_bf16_gemm", 0, 100), _Ev("ampere_bf16_gemm", 800, 900), _Ev("cpu_op", 0, 50, cuda=False)]
+    prof = type("P", (), {"events": lambda self: events})()
+    dev = timer.profiler_device_events(prof)
+    assert [e[0] for e in dev] == ["ampere_bf16_gemm", "ampere_bf16_gemm"]
+    k = timer.kernel_summary(dev, 1)
+    assert k["kernels_per_step"] == 2 and k["gpu_busy_pct"] == pytest.approx(200 / 900 * 100)
 
 
 # ------------------------------------------------------------------------------ output helpers
@@ -251,69 +370,84 @@ def test_parse_accepts_overrides_on_both_sides_of_the_flags():
 
 # ------------------------------------------------------------------------------ end to end (CPU)
 
-def _run_main(tmp_path, tag, *extra):
+def _run_main(out_dir, tag, *extra):
     argv = ["--config", str(TINY), "--tag", tag, "--steps", "4", "--warmup", "2",
-            "data.source=synthetic", f"model.vocab_size={VOCAB}", f"bench.out_dir={tmp_path / 'runs'}", *extra]
+            "data.source=synthetic", f"model.vocab_size={VOCAB}", f"bench.out_dir={out_dir}", *extra]
     return bench.main(argv)
 
 
-@pytest.fixture
-def first_run(tmp_path):
-    code = _run_main(tmp_path, "first", "--modes", "clean,layer,checkpoint", "--level", "3")
-    path = tmp_path / "runs" / "first.json"
-    return code, path, json.loads(path.read_text())
+@pytest.fixture(scope="module", params=["reversible", "plain"])
+def first_run(request, tmp_path_factory):
+    """One bench run per stack, shared by the tests below (the function-scoped fake_loader cannot be used here)."""
+    tmp = tmp_path_factory.mktemp(request.param)
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(bench, "Loader", FakeLoader)
+        mp.setattr(bench, "CACHE", tmp / "cache")
+        stack = f"model.reversible={'true' if request.param == 'reversible' else 'false'}"
+        code = _run_main(tmp / "runs", "first", "--modes", "clean,layer,checkpoint", "--level", "3", stack)
+    path = tmp / "runs" / "first.json"
+    return {"code": code, "path": path, "run": json.loads(path.read_text()), "cache": tmp / "cache", "stack": stack}
 
 
 def test_main_writes_a_complete_valid_run(first_run):
-    code, path, run = first_run
-    assert code == 0, "exit code 0 means validate_run found nothing missing"
+    run = first_run["run"]
+    assert first_run["code"] == 0, "exit code 0 means validate_run found nothing missing"
     assert validate_run(run) == []
     assert run["meta"]["vocab_size"] == VOCAB and run["meta"]["tokenizer"]["revision"] == bench.TOKENIZER_REVISION
     assert run["clean"]["step_ms"]["n"] == 4 and run["clean"]["step_ms"]["median"] > 0
     assert run["metrics"]["tokens_per_s"] > 0 and run["metrics"]["params_total"] >= run["metrics"]["params_active"]
+    assert set(run["goodput"]["badput_s"]) == {"startup", "first_step", "warmup"}
 
 
 def test_main_times_whole_blocks_and_the_step_parts(first_run):
-    _, _, run = first_run
-    regions = run["layer"]["regions"]
+    regions = first_run["run"]["layer"]["regions"]
     for part in ("fwd", "bwd", "opt", "fwd:embed", "fwd:head+loss", "fwd:block0", "fwd:block1",
                  "bwd:head+loss", "bwd:block0", "bwd:block1", "bwd:stack", "bwd:embed", "opt:opt.clip"):
         assert part in regions, f"missing gated part {part}"
         assert regions[part]["level"] <= 2 and regions[part]["median"] >= 0
     assert any(r["level"] == 3 for r in regions.values()), "bench.level=3 must also time the parts inside a block"
-    assert run["layer"]["overhead_pct"] is not None
+    assert first_run["run"]["layer"]["overhead_pct"] is not None
+    assert first_run["run"]["layer"]["data_host_ms"]["n"] == 4
+
+
+def test_main_backward_parts_add_up(first_run):
+    """bwd = head+loss + stack + embed, and bwd:stack = the blocks, in both stacks (CPU: exact clocks)."""
+    r = {n: v["median"] for n, v in first_run["run"]["layer"]["regions"].items()}
+    blocks = sum(r[f"bwd:block{i}"] for i in range(2))
+    assert r["bwd:head+loss"] + r["bwd:stack"] + r["bwd:embed"] == pytest.approx(r["bwd"], rel=0.15)
+    assert blocks == pytest.approx(r["bwd:stack"], rel=0.15)
 
 
 def test_main_measures_checkpoint_save(first_run):
-    _, _, run = first_run
-    ck = run["checkpoint"]
-    assert ck["save_ms"]["median"] > 0 and ck["save_ms"]["n"] >= 1
-    assert not list((bench.CACHE / "ckpt").glob("*")) if (bench.CACHE / "ckpt").exists() else True   # deleted after
+    ck = first_run["run"]["checkpoint"]
+    assert ck["save_ms"]["median"] > 0 and ck["save_ms"]["n"] == ck["repeats"] == 10 and ck["discarded_first"]
+    assert not list((first_run["cache"] / "ckpt").glob("*")), "the checkpoint file must be deleted after"
 
 
 def test_main_flags_a_run_with_the_wrong_vocabulary(first_run):
-    _, _, run = first_run
-    assert any("rule 1a" in w for w in run["warnings"])      # the test model uses 512, not 131072
-    assert any("rule 3b" in w and "comm" in w for w in run["warnings"])
+    warnings = first_run["run"]["warnings"]
+    assert any("rule 1a" in w for w in warnings)              # the test model uses 512, not 131072
+    assert any("rule 3b" in w and "comm" in w for w in warnings)
 
 
 def test_main_against_exit_codes(tmp_path, first_run, capsys):
-    _, path, run = first_run
+    stack = first_run["stack"]
     # same numbers: every part agrees
-    code = _run_main(tmp_path, "same", "--modes", "clean,layer", "--level", "3", "--against", str(path),
-                     "report.tol_pct=1000")
+    code = _run_main(tmp_path / "runs", "same", "--modes", "clean,layer", "--level", "3", "--against",
+                     str(first_run["path"]), "report.tol_pct=1000", stack)
     assert code == 0
     assert "PASS" in capsys.readouterr().out
     # the earlier run says the step took a hundredth of the time: this run is far outside tol_pct
-    fast = copy.deepcopy(run)
+    fast = copy.deepcopy(first_run["run"])
     fast["clean"]["step_ms"]["median"] /= 100
     other = tmp_path / "fast.json"
     other.write_text(json.dumps(fast))
-    code = _run_main(tmp_path, "slow", "--modes", "clean,layer", "--level", "3", "--against", str(other))
+    code = _run_main(tmp_path / "runs", "slow", "--modes", "clean,layer", "--level", "3", "--against", str(other),
+                     stack)
     assert code == 2
     assert "FAIL" in capsys.readouterr().out
 
 
 def test_main_rejects_an_unknown_mode(tmp_path):
     with pytest.raises(SystemExit):
-        _run_main(tmp_path, "x", "--modes", "clean,nonsense")
+        _run_main(tmp_path / "runs", "x", "--modes", "clean,nonsense")
