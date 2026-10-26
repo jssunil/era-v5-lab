@@ -1,0 +1,151 @@
+doc_id,read,verdict,diseases,evidence,hex,note
+8c1aed2f8a439b91,partial,fix,C2,"C2: ""MIT Introduction to Deep Learn"" repeated 8x, first at offset 56",,auto-filled from script hints; not reviewed
+6d2428a3ad8e41d6,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+2e1a062fc21d315b,partial,clean,,,,auto: no script signal; not reviewed
+50cc681aabd3d82b,partial,fix,C2,"C2: ""Motion Carried."" repeated 35x, first at offset 1816",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+507d7cf0978d22e4,partial,fix,C2,"C2: ""Member of Congress"" repeated 243x, first at offset 107006",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+3db737dca1122c53,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+33d1f7b3eec4d2c0,partial,clean,,,,auto: no script signal; not reviewed
+b0d032fadb33dbf4,partial,fix,C2,"C2: ""|-------------|----------|"" repeated 19x, first at offset 9358",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+b7c735b64d1af67a,partial,clean,,,,auto: no script signal; not reviewed
+55f375144ed541bf,partial,fix,C2,"C2: ""(TIF)"" repeated 6x, first at offset 54346",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+73fbd40e1111121e,partial,fix,C2,"C2: ""CITY OF WORTHINGTON"" repeated 64x, first at offset 57981",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+8b5b54304788333e,partial,fix,C2,"C2: ""\hline"" repeated 7x, first at offset 113067",,auto-filled from script hints; not reviewed
+854af92dbde41a63,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+776e2d329eaeeb77,partial,fix,C2,"C2: ""\begin{cases}"" repeated 5x, first at offset 51",,auto-filled from script hints; not reviewed
+e44cb4676171abba,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+7ea84af3398cb3ed,partial,fix,B2;C2,"B2: '<br>' at 445945, '<br>' at 446002, '<br>' at 446386, '<br>' at 446435, '<br>' at 446507 (5 total) | C2: ""- **Date Approved:** 08/02/202"" repeated 33x, first at offset 218309",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+8acbf1b8c927795d,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+4f3067e9d3a6b2b8,partial,clean,,,,auto: no script signal; not reviewed
+cb2c6fb11ebf329e,partial,clean,,,,auto: no script signal; not reviewed
+494eabee8799f93a,partial,clean,,,,auto: no script signal; not reviewed
+50f74766355f26d3,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+c298d58f6344ddde,partial,clean,,,,auto: no script signal; not reviewed
+c6acd9e6d213d6f4,partial,clean,,,,auto: no script signal; not reviewed
+4656c1ed1d4393c4,partial,fix,C2,"C2: ""Metal concentrations (mg/kg dw"" repeated 6x, first at offset 3824",,auto-filled from script hints; not reviewed
+a243639493a0e633,partial,fix,C2,"C2: ""| --- | --- |"" repeated 5x, first at offset 35080",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+eee25e81417bc1b7,partial,clean,,,,auto: no script signal; not reviewed
+83449c2d7a1d9e03,partial,fix,C2,"C2: ""| ANSWER CHOICES | RESPONSES |"" repeated 5x, first at offset 34263",,auto-filled from script hints; not reviewed
+cc26121e33c42f1b,partial,clean,,,,auto: no script signal; not reviewed
+2d2c43ce5f335d3d,partial,clean,,,,auto: no script signal; not reviewed
+51a4fb599da754db,partial,clean,,,,auto: no script signal; not reviewed
+053c80cc1a9b16bc,partial,fix,C2,"C2: ""|                             "" repeated 28x, first at offset 58663",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+6acc7c94105bdebd,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+42251c5ad07d17d4,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+dbc199ea29145c03,partial,clean,,,,auto: no script signal; not reviewed
+5899e41d188800b4,partial,clean,,,,auto: no script signal; not reviewed
+b44b092b0e829a12,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+fb2ef557617d7ad1,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+54cb8c8803e08af4,partial,fix,C2,"C2: ""Canyon Creek Alluvial Fan Risk"" repeated 10x, first at offset 0",,auto-filled from script hints; not reviewed
+e297884606b7596d,partial,clean,,,,auto: no script signal; not reviewed
+5e5ff4de55e7e018,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+6da51c7f3a3b6ff4,partial,fix,C2,"C2: ""Subgroups with less than 20 st"" repeated 90x, first at offset 18962",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+d20d4f04e5704ba7,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+53ff455424cff71f,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+d1a387dea20a1242,partial,clean,,,,auto: no script signal; not reviewed
+26a07693d706218f,partial,fix,C2,"C2: ""i. Paper II"" repeated 14x, first at offset 128",,auto-filled from script hints; not reviewed
+ae07689169b90384,partial,clean,,,,auto: no script signal; not reviewed
+06b18306786f56a5,partial,clean,,,,auto: no script signal; not reviewed
+3b215cb29425e7d6,partial,clean,,,,auto: no script signal; not reviewed
+ecf88dd0f06c4b35,partial,fix,C2,"C2: ""Heartland Career Center"" repeated 8x, first at offset 0",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+7ee29203d895d80f,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+9c3996ebe2857e30,partial,clean,,,,auto: no script signal; not reviewed
+6339f30546c81c2e,partial,clean,,,,auto: no script signal; not reviewed
+0e4cfb3b81d67dc5,partial,fix,C2,"C2: ""sat. FP tail direction"" repeated 15x, first at offset 61",,auto-filled from script hints; not reviewed
+07b068caa59048f9,partial,clean,,,,auto: no script signal; not reviewed
+a6dca2c281646a03,partial,fix,C2,"C2: ""(c) it is otherwise in the int"" repeated 5x, first at offset 13177",,auto-filled from script hints; not reviewed
+2b0f374583268f3c,partial,fix,C2,"C2: ""| PERMIT REQUIREMENT | | | | |"" repeated 6x, first at offset 20350",,auto-filled from script hints; not reviewed
+0798582b775b470f,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+08b7ae2fa0363275,partial,clean,,,,auto: no script signal; not reviewed
+3c2aebcdc61e5694,partial,fix,C2,"C2: ""\begin{align*}"" repeated 9x, first at offset 15828",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+35eb8b91a98d3a41,partial,fix,C2,"C2: ""* * * * *"" repeated 17x, first at offset 540309",,auto-filled from script hints; not reviewed
+c9df663ed9fb5bea,partial,clean,,,,auto: no script signal; not reviewed
+6e54aa31a9a0611e,partial,clean,,,,auto: no script signal; not reviewed
+3cdf7221196813da,partial,fix,C2,"C2: ""|        | License Categories:"" repeated 15x, first at offset 183292",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+1cc10779aced9a7f,partial,fix,C2,"C2: ""For identification purposes on"" repeated 20x, first at offset 84",,auto-filled from script hints; not reviewed
+44f66c3734e3d5ca,partial,clean,,,,auto: no script signal; not reviewed
+192aba9b7f84e8ca,partial,clean,,,,auto: no script signal; not reviewed
+93adf8697409e36c,partial,fix,C2,"C2: ""| SIZE   | A    | F    | H    "" repeated 5x, first at offset 5671",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+5bf37f2a0813d0c1,partial,clean,,,,auto: no script signal; not reviewed
+7baed34b2308e9c5,partial,clean,,,,auto: no script signal; not reviewed
+bd1a8bb7d789e910,partial,clean,,,,auto: no script signal; not reviewed
+7851ac162534fb8a,partial,clean,,,,auto: no script signal; not reviewed
+373b76e02c705704,partial,clean,,,,auto: no script signal; not reviewed
+5938b33ca03c380a,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+920855df51f37db8,partial,clean,,,,auto: no script signal; not reviewed
+cdc5973ec2161f44,partial,fix,A6,"A6: 1 words mix Latin and Cyrillic, first Cyrillic letter at offset 85433",85433 U+0438 CYRILLIC SMALL LETTER I,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+9110713e77637024,partial,clean,,,,auto: no script signal; not reviewed
+19e4332d89d32061,partial,clean,,,,auto: no script signal; not reviewed
+0d8b7d532a14c69a,partial,clean,,,,auto: no script signal; not reviewed
+b09404dd12a456be,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+795fa56071e88c0c,partial,clean,,,,auto: no script signal; not reviewed
+8c2c1359b53f9442,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+bfbe6f0f5d61c19e,partial,clean,,,,auto: no script signal; not reviewed
+9486f7dfe7c330e3,partial,clean,,,,auto: no script signal; not reviewed
+fb58071a2b5e5cdb,partial,fix,C2,"C2: ""### State Election"" repeated 10x, first at offset 1544",,auto-filled from script hints; not reviewed
+41f54eb5c63d60cc,partial,clean,,,,auto: no script signal; not reviewed
+75611d2315b9312e,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+0f04545eee94d987,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+e554caf656494ae2,partial,fix,C2,"C2: ""ABSTRACT"" repeated 6x, first at offset 6870",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+a3472c2ba98c2551,partial,fix,C2,"C2: ""| RUB thousand | 31 December 2"" repeated 11x, first at offset 102247",,auto-filled from script hints; not reviewed
+7b3bae075770d199,partial,clean,,,,auto: no script signal; not reviewed
+5f7545c1f4a386b1,partial,fix,C2,"C2: ""Member of the Virgin Islands L"" repeated 13x, first at offset 338587",,auto-filled from script hints; not reviewed
+a6e70d0fef431172,partial,fix,C2,"C2: ""|         |              |    "" repeated 9x, first at offset 115402",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+32e5e0b143c36d65,partial,clean,,,,auto: no script signal; not reviewed
+c6d6f16f70df8b71,partial,clean,,,,auto: no script signal; not reviewed
+510796b2fbb42bb7,partial,fix,C2,"C2: ""| E 609-00000-252       | Beer"" repeated 8x, first at offset 39669",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+d0a0a41263e845f5,partial,clean,,,,auto: no script signal; not reviewed
+4b958ac1f45443b5,partial,clean,,,,auto: no script signal; not reviewed
+9397bad7ea9147ce,partial,clean,,,,auto: no script signal; not reviewed
+650e04c676aed57f,partial,fix,C2,"C2: ""| Time       | Location     | "" repeated 17x, first at offset 43937",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+ee1386df10972650,partial,clean,,,,auto: no script signal; not reviewed
+f94ced321243b853,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+1c686de5116ab261,partial,clean,,,,auto: no script signal; not reviewed
+0d51f1448091e52b,partial,clean,,,,auto: no script signal; not reviewed
+6324a2bb8fae9275,partial,fix,C2,"C2: ""|   | $\chi_1$ limits | $\chi_"" repeated 5x, first at offset 31524",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+ec7cb30bfd82a1f0,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+9c8350f1f10c7755,partial,clean,,,,auto: no script signal; not reviewed
+cb2103a228e1c9e0,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+8854bf31b8eea361,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+135ae306b27ebd17,partial,fix,C2,"C2: ""**Temperatures**"" repeated 7x, first at offset 130",,auto-filled from script hints; not reviewed
+5a17c561359e5ad0,partial,clean,,,,auto: no script signal; not reviewed
+89810040c152f744,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+46cb8ba60cf8db87,partial,clean,,,,auto: no script signal; not reviewed
+852c345e050e9441,partial,clean,,,,auto: no script signal; not reviewed
+2b31d7a5187ded6b,partial,fix,C2,"C2: ""__________________________"" repeated 14x, first at offset 3693",,auto-filled from script hints; not reviewed
+b64c51d59247a36c,partial,fix,C2,"C2: ""______________________________"" repeated 7x, first at offset 23476",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+97eee69aa2323e7c,partial,fix,C2,"C2: ""CITY OF WORTHINGTON"" repeated 36x, first at offset 29874",,auto-filled from script hints; not reviewed
+80c340aef304a24c,partial,fix,C2,"C2: ""Standard errors in parentheses"" repeated 11x, first at offset 99801",,auto-filled from script hints; not reviewed
+6bbcabe06c799acf,partial,fix,C2,"C2: ""AMERICAN COLLEGE OF DENTISTS"" repeated 5x, first at offset 15",,auto-filled from script hints; not reviewed
+6dc622390a3f7207,partial,fix,C2,"C2: ""|            |                "" repeated 20x, first at offset 259148",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+d1ee0cc1fc5585ea,partial,clean,,,,auto: no script signal; not reviewed
+12379eff30e2aa1c,partial,clean,,,,auto: no script signal; not reviewed
+55481768224c273c,partial,clean,,,,auto: no script signal; not reviewed
+d7a3e129dcd9c041,partial,fix,C2,"C2: ""Office of the Solicitor"" repeated 8x, first at offset 6218",,auto-filled from script hints; not reviewed
+63e0a8b8fa721ac1,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+17bf50323767c8c4,partial,clean,,,,auto: no script signal; not reviewed
+2934f10a13faaf17,partial,fix,C2,"C2: ""Dietary Treatments: 2011"" repeated 5x, first at offset 8672",,auto-filled from script hints; not reviewed
+031d526e862d6f22,partial,clean,,,,auto: no script signal; not reviewed
+43949d5b447163f9,partial,clean,,,,auto: no script signal; not reviewed
+40545692a3028d08,partial,clean,,,,auto: no script signal; not reviewed
+3ea82e8a6a59f907,partial,clean,,,,auto: no script signal; not reviewed
+d6dcd8fca4d05d49,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+6dead752bf0c71a8,partial,fix,C2,"C2: ""Indications:"" repeated 5x, first at offset 12093",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+b01bfbf64f278c75,partial,fix,C2,"C2: ""CITY OF WORTHINGTON"" repeated 32x, first at offset 55846",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+e04740473cbb5c5f,partial,clean,,,,auto: no script signal; not reviewed
+6eac4cbc86bf4831,partial,clean,,,,auto: no script signal; not reviewed
+fc92d9601c5fdeab,partial,clean,,,,auto: no script signal; not reviewed
+b9bd84343e8b719c,partial,clean,,,,auto: no script signal; not reviewed
+d2f5187d49778f27,partial,clean,,,,auto: no script signal; not reviewed
+d1b2e193abc4a5f3,partial,clean,,,,auto: no script signal; not reviewed
+39a6ca1024de1f95,partial,fix,C2,"C2: repeated 12x, first at offset 22584",,"auto-filled from script hints; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+b477d0a6939bb7de,partial,clean,,,,auto: no script signal; not reviewed
+66e8f3005cd3abc9,partial,clean,,,,auto: no script signal; not reviewed
+39857b0ef2904033,partial,clean,,,,auto: no script signal; not reviewed
+88f0c927fdb6219b,partial,clean,,,,auto: no script signal; not reviewed
+3994bec2f780bbc1,partial,fix,C2,"C2: ""Poetry Place"" repeated 5x, first at offset 3302",,auto-filled from script hints; not reviewed
+eb1ad9ea3743f0ec,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
+37f4f272f7748f17,partial,clean,,,,auto: no script signal; not reviewed
+f26a6a8bd745c1a2,partial,clean,,,,auto: no script signal; not reviewed
+f5faeb5d20b73087,partial,clean,,,,auto: no script signal; not reviewed
+6a0f83a52aeeb184,partial,clean,,,,"auto: no script signal; not reviewed; email-shaped placeholder (not real F1), phone numbers not auto-checked"
