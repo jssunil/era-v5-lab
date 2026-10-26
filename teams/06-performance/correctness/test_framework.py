@@ -245,3 +245,61 @@ def test_output_structure_list_vs_tuple_fails(device):
                         lambda x: (x * 2, 3))
     with pytest.raises(AssertionError, match="output structure mismatch"):
         check(p, device)
+
+
+def test_output_structure_python_float_precision_difference_passes(device):
+    p = _structure_pair(lambda x: (x * 2, (x.double() / 3).item()),
+                        lambda x: (x * 2, (x / 3).item()))
+    assert "out[0]" in check(p, device)
+
+
+def test_output_structure_python_float_large_difference_fails(device):
+    p = _structure_pair(lambda x: (x * 2, 1.0),
+                        lambda x: (x * 2, 1.1))
+    with pytest.raises(AssertionError, match="non-tensor float output mismatch"):
+        check(p, device)
+
+
+@pytest.mark.parametrize("ref_value,fast_value", [
+    (float("nan"), float("nan")),
+    (float("inf"), float("inf")),
+])
+def test_output_structure_nonfinite_float_fails(device, ref_value, fast_value):
+    p = _structure_pair(lambda x: (x * 2, ref_value),
+                        lambda x: (x * 2, fast_value))
+    with pytest.raises(AssertionError, match="non-tensor float output mismatch"):
+        check(p, device)
+
+
+def test_output_structure_python_float_near_zero_passes(device):
+    p = _structure_pair(lambda x: (x * 2, 0.0),
+                        lambda x: (x * 2, 1e-7))
+    assert "out[0]" in check(p, device)
+
+
+def test_output_structure_nested_tensor_wrong_value_fails(device):
+    p = _structure_pair(lambda x: (x * 2, (x * 3,)),
+                        lambda x: (x * 2, (x * 999,)))
+    with pytest.raises(AssertionError, match=r"out\[1\]"):
+        check(p, device)
+
+
+def test_output_structure_nested_tensors_correct_pass(device):
+    p = _structure_pair(lambda x: (x * 2, [None, (x * 3,)]),
+                        lambda x: (x * 2, [None, (x * 3,)]))
+    errors = check(p, device)
+    assert {"out[0]", "out[1]"} <= set(errors)
+
+
+def test_output_structure_nested_metadata_still_fails(device):
+    p = _structure_pair(lambda x: (x * 2, ("ok", 3)),
+                        lambda x: (x * 2, ("bad", 3)))
+    with pytest.raises(AssertionError, match="non-tensor output mismatch"):
+        check(p, device)
+
+
+def test_output_structure_nested_container_type_mismatch_fails(device):
+    p = _structure_pair(lambda x: (x * 2, (x * 3,)),
+                        lambda x: (x * 2, [x * 3]))
+    with pytest.raises(AssertionError, match="output structure mismatch"):
+        check(p, device)
