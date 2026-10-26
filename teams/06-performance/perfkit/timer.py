@@ -7,7 +7,8 @@ after the step. Nothing in this file synchronizes inside a timed step.
 
   sync(device)                       wait for cuda / mps / cpu (only outside a timed step)
   StepTimer(device)                  one event pair per step: start() / stop(); times_ms() syncs once
-  stats(xs)                          median, p10, p90, iqr, min, max, n, spread_pct. Never the mean.
+  stats(xs)                          median, p10, p90, iqr, min, max, n, spread_pct (the numbers we gate on),
+                                     plus mean and std for information (Task 2 of G6_Team_Task_Plan.md).
   Buckets(device)                    wall-clock seconds per named bucket (startup, compile, checkpoint)
   EventPool()                        reusable CUDA events, so a timed step allocates none
   EventRecorder(device, max_level)   layer mode: the recorder protocol of perfkit/regions.py
@@ -19,7 +20,8 @@ after the step. Nothing in this file synchronizes inside a timed step.
   count_syncs(fn)                    host syncs a call makes, and the source lines that make them
 
 Rules (docs/PLAN.md 2.5): no synchronize / .item() / print inside a timed step; read events after
-the steps; report medians and percentiles, never means.
+the steps; gate on medians and percentiles. mean and std are reported next to them but never gated:
+one slow step moves the mean, which is why the 5% check uses the median.
 
 On CPU, perf_counter is exact (CPU work is synchronous). On MPS there are no timing events we rely
 on, so StepTimer and EventRecorder synchronize at every boundary there; MPS numbers are flagged.
@@ -36,7 +38,9 @@ from pathlib import Path
 
 import torch
 
-STAT_KEYS = ("median", "p10", "p90", "iqr", "min", "max", "n", "spread_pct")
+# mean and std are new (Task 2): the team plan asks for "p50, p90, mean and std". They are extra keys, so
+# every reader of the old keys (bench, report, schema.validate_run) is unaffected.
+STAT_KEYS = ("median", "p10", "p90", "iqr", "min", "max", "n", "spread_pct", "mean", "std")
 
 
 # ------------------------------------------------------------------------------ basics
@@ -64,6 +68,7 @@ def _quantile(sorted_xs, q):
 
 def stats(xs) -> dict:
     """median, p10, p90, iqr (p75 - p25), min, max, n, and spread_pct = (p90 - p10) / median * 100.
+    Also mean and std (sample standard deviation, n - 1; 0.0 for a single value), for information only.
 
     spread_pct is the quick check for the 5% gate: a part whose own p10..p90 spread is above ~5% is
     unlikely to agree within 5% between two runs.
@@ -78,6 +83,10 @@ def stats(xs) -> dict:
         "iqr": _quantile(a, 0.75) - _quantile(a, 0.25),
         "min": a[0], "max": a[-1], "n": len(a),
         "spread_pct": (p90 - p10) / med * 100 if med else None,
+        # Task 2: the plan asks for mean and std. n - 1 (sample std) because the steps are a sample of what the
+        # GPU can do; one value has no spread, so 0.0.
+        "mean": sum(a) / len(a),
+        "std": math.sqrt(sum((x - sum(a) / len(a)) ** 2 for x in a) / (len(a) - 1)) if len(a) > 1 else 0.0,
     }
 
 
