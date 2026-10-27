@@ -1,25 +1,26 @@
 # The five slowest parts (v0)
 
-GPU: NVIDIA A100-SXM4-40GB, bf16, B=32, T=512, `configs/lab_small.yaml`. Step 497 ms (median of 150 steps).
-A part is a region summed over the 9 layers. Each trace is one occurrence (layer 4, or the whole step for Muon)
-cut from the profiler trace: open it in https://ui.perfetto.dev or `chrome://tracing`. It shows when the CPU
-queued the work and when the GPU ran it, with arrows from each launch to its kernel.
+GPU: NVIDIA A100-SXM4-40GB, bf16, B=32, T=512, `configs/lab_small.yaml`, commit `f1f4986`, run `baseline_v0`.
+Step 507 ms (median of 150 steps). A part is a region summed over the 9 layers. Each trace is one occurrence
+(layer 4, or the whole step for Muon) cut from the profiler trace: open it in https://ui.perfetto.dev or
+`chrome://tracing`. It shows when the CPU queued the work and when the GPU ran it, with arrows from each launch
+to its kernel.
 
 **One cause behind most of it:** the step is CPU-bound. The GPU is busy only 25% of the step: 18,400 kernels and
-433 host syncs per step. In parts 1, 2, 3 and 5 below the CPU takes 5 to 8 times longer than the GPU work it
+433 host syncs per step. In parts 1, 2, 3 and 5 below the CPU takes 4 to 8 times longer than the GPU work it
 launches. Part 4 is the exception: the GPU is busy all the time, moving memory.
 
 | # | Part | ms | % of step | CPU time in trace | GPU kernel time in trace | Trace |
 |---|---|---:|---:|---:|---:|---|
-| 1 | `opt:opt.muon.ns` | 144.2 | 29.0% | 67.1 ms (47 of 189 matrices) | 8.1 ms | `runs/z_parts/1_opt_opt.muon.ns.json` |
-| 2 | `bwd:block*.grad` | 87.8 | 17.7% | 19.3 ms (layer 4) | 4.1 ms | `runs/z_parts/2_bwd_block4.grad.json` |
-| 3 | `fwd:block*.moe.dispatch` | 49.7 | 10.0% | 9.3 ms (layer 4) | 1.2 ms | `runs/z_parts/3_fwd_block4.moe.dispatch.json` |
-| 4 | `bwd:head+loss` | 48.2 | 9.7% | 1.3 ms | 48.2 ms | `runs/z_parts/4_bwd_head+loss.json` |
-| 5 | `bwd.recompute:block*.moe.dispatch` | 45.2 | 9.1% | 8.4 ms (layer 4) | 1.3 ms | `runs/z_parts/5_bwd.recompute_block4.moe.dispatch.json` |
+| 1 | `opt:opt.muon.ns` | 145.9 | 28.8% | 67.1 ms (47 of 189 matrices) | 8.1 ms | `runs/baseline_v0_parts/1_opt_opt.muon.ns.json` |
+| 2 | `bwd:block*.grad` | 90.4 | 17.8% | 18.1 ms (layer 4) | 4.1 ms | `runs/baseline_v0_parts/2_bwd_block4.grad.json` |
+| 3 | `fwd:block*.moe.dispatch` | 50.6 | 10.0% | 8.6 ms (layer 4) | 1.3 ms | `runs/baseline_v0_parts/3_fwd_block4.moe.dispatch.json` |
+| 4 | `bwd:head+loss` | 48.2 | 9.5% | 1.4 ms | 48.1 ms | `runs/baseline_v0_parts/4_bwd_head+loss.json` |
+| 5 | `bwd.recompute:block*.moe.dispatch` | 46.0 | 9.1% | 8.4 ms (layer 4) | 1.3 ms | `runs/baseline_v0_parts/5_bwd.recompute_block4.moe.dispatch.json` |
 
-Together: 375 ms, 75% of the step.
+Together: 381 ms, 75% of the step.
 
-## 1. Muon Newton-Schulz: `opt:opt.muon.ns`, 144 ms (29%)
+## 1. Muon Newton-Schulz: `opt:opt.muon.ns`, 146 ms (29%)
 
 - **What the trace shows:** Muon orthogonalizes each of the 189 block weight matrices separately: 5 iterations
   of 3 small matmuls plus element-wise ops, about 49 kernel launches per matrix. In the 47 matrices kept in the
@@ -31,9 +32,9 @@ Together: 375 ms, 75% of the step.
   5 chains of launches instead of 189. Switch: `optim.muon_impl: loop -> batched`, with a `@pair` test against
   the per-matrix loop.
 
-## 2. Local backward of each reversible block: `bwd:block*.grad`, 88 ms (18%)
+## 2. Local backward of each reversible block: `bwd:block*.grad`, 90 ms (18%)
 
-- **What the trace shows:** layer 4's backward makes 627 kernel launches; the CPU takes 19.3 ms, the GPU 4.1 ms.
+- **What the trace shows:** layer 4's backward makes 613 kernel launches; the CPU takes 18.1 ms, the GPU 4.1 ms.
   The largest kernels are element-wise ops, reductions and a radix sort (from the MoE gather / `index_add_`
   backward), each under 1 ms.
 - **Cause:** launch-bound. Many small kernels per block: attention, 8 experts' MLPs, gathers and scatters, all
@@ -42,9 +43,9 @@ Together: 375 ms, 75% of the step.
   block, reused for all 9). This fuses the element-wise and normalization kernels and cuts launches. It needs part
   3 first: the MoE host syncs break the compiled graph.
 
-## 3. MoE dispatch, forward: `fwd:block*.moe.dispatch`, 50 ms (10%)
+## 3. MoE dispatch, forward: `fwd:block*.moe.dispatch`, 51 ms (10%)
 
-- **What the trace shows:** layer 4's dispatch takes 9.3 ms on the CPU for 1.2 ms of GPU work. It makes 16 host
+- **What the trace shows:** layer 4's dispatch takes 8.6 ms on the CPU for 1.3 ms of GPU work. It makes 16 host
   syncs: 2 per expert, at `models/moe.py:72` (`tok.any()`) and `:74` (`nonzero`). Each one stops the CPU until
   the GPU catches up.
 - **Cause:** the loop dispatch handles one expert at a time and asks the GPU which tokens it has. Across the
@@ -56,7 +57,7 @@ Together: 375 ms, 75% of the step.
 
 ## 4. Head and loss, backward: `bwd:head+loss`, 48 ms (10%)
 
-- **What the trace shows:** GPU-bound; the CPU queues 20 launches in 1.3 ms. `cunn_SoftMaxBackward` alone takes
+- **What the trace shows:** GPU-bound; the CPU queues 20 launches in 1.4 ms. `cunn_SoftMaxBackward` alone takes
   25 ms, plus 15 ms of element-wise kernels. The fp32 logits are 16,384 x 131,072 = 8.6 GB. The softmax backward
   reads two such tensors and writes one, 25.8 GB in 25 ms: 1.0 TB/s, about 66% of the A100's 1.55 TB/s.
 - **Cause:** memory-bound. The full fp32 logits are built, stored and read back. Together with the forward
@@ -67,15 +68,15 @@ Together: 375 ms, 75% of the step.
   `FusedLinearCrossEntropy` or Apple's Cut Cross-Entropy (CCE). It becomes `model.ce_impl: fused`, tested by a
   `model.lab_small.fused` pair like `model.lab_small.chunked`.
 
-## 5. MoE dispatch, recomputed in the reversible backward: `bwd.recompute:block*.moe.dispatch`, 45 ms (9%)
+## 5. MoE dispatch, recomputed in the reversible backward: `bwd.recompute:block*.moe.dispatch`, 46 ms (9%)
 
 - **What the trace shows:** the same pattern as part 3 (8.4 ms on the CPU, 1.3 ms on the GPU, 16 syncs), because
   the reversible backward runs each block's forward again.
 - **Cause:** for each block, the reversible backward computes `f(p)` twice on the same input: once in
   `bwd.invert` to rebuild the previous state, without gradients (`models/reversible.py:112`), and once in
-  `bwd.recompute`, with gradients (`:117`). Together the two passes take 115 ms: invert 55.5 ms, recompute 59.3 ms.
+  `bwd.recompute`, with gradients (`:117`). Together the two passes take 119 ms: invert 57.6 ms, recompute 61.0 ms.
 - **Week-2 idea:** compute `f(p)` once with gradients and rebuild the previous state from it:
-  `prev = curr_out - 2h * f.detach()`. The maths is the same and the invert pass goes away, about 55 ms. It is
+  `prev = curr_out - 2h * f.detach()`. The maths is the same and the invert pass goes away, about 58 ms. It is
   checked by the existing `reversible.*` and `model.lab_small` pairs, and the HFU formula in `perfkit/metrics.py`
   drops one of the two extra forwards.
 
@@ -93,4 +94,4 @@ candidate, which bounds what fixing it can give.
 | Plain NanoGPT (`configs/base.yaml`) | 112 | | 25.8 GB | GPU 100% busy, MFU 12%: the floor of this setup |
 
 Already done in v0: the MoE token counts no longer sync with the host (`models/moe.py`): 649 to 433 syncs per
-step, 514 to 497 ms.
+step, 514 to 497-507 ms across runs on this GPU.
