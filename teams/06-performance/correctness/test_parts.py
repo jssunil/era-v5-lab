@@ -4,8 +4,9 @@
     not parts; <x>.expert<E> is folded into <x>; the plain stack's bwd:block<i> segments are parts.
   * cut_trace on a hand-made GPU trace: only the last profiled step; the CPU events inside the region; the kernels
     it launched (by correlation ID), even when they run after the CPU range ends; not the kernels of other parts;
-    launch arrows and thread names kept; bwd:<name> segments cut between mark() points; the size cap drops
-    later calls of a repeated region first.
+    launch arrows and thread names kept; bwd:<name> segments cut between mark() points; the size cap keeps
+    an evenly spaced sample of a repeated region's calls (first to last, not the front half) before it drops
+    CPU detail.
   * GpuSampler: nothing off CUDA; CSV parsing and the summary; end to end against a fake nvidia-smi on PATH.
 No GPU needed.
 """
@@ -125,17 +126,22 @@ def test_cut_returns_none_for_a_region_not_in_the_trace():
     assert P.cut_trace(_trace(), "fwd:block7.attn.sdpa") is None
 
 
-def test_size_cap_drops_later_calls_first():
-    t = {"traceEvents": [_x("ProfilerStep#1", 0, 10_000, "user_annotation")]}
-    for i in range(8):                                                      # 8 calls of one region, ~4 KB each
+def test_size_cap_samples_calls_across_the_step():
+    t = {"traceEvents": [_x("ProfilerStep#1", 0, 30_000, "user_annotation")]}
+    for i in range(20):                                                     # 20 calls of one region, ~4 KB each
         t["traceEvents"].append(_x("opt:opt.muon.ns", 1000 * i, 500, "user_annotation"))
         t["traceEvents"] += [_x("aten::mm", 1000 * i + j, 1, "cpu_op", pad="x" * 40) for j in range(50)]
     full = P.cut_trace(t, "opt:opt.muon.ns")
-    assert full["era_part"]["calls_kept"] == 8
-    small = P.cut_trace(t, "opt:opt.muon.ns", max_bytes=len(json.dumps(full)) // 3)
-    assert small["era_part"]["calls_in_step"] == 8 and small["era_part"]["calls_kept"] < 8
-    assert small["era_part"]["cpu_detail"] is True                          # calls dropped before CPU detail
-    assert len(P._dump(small)) <= len(json.dumps(full)) // 3
+    assert full["era_part"]["calls_kept"] == 20 and full["era_part"]["stride"] == 1
+    cap = len(json.dumps(full)) // 3
+    small = P.cut_trace(t, "opt:opt.muon.ns", max_bytes=cap)
+    info = small["era_part"]
+    assert info["calls_in_step"] == 20 and info["calls_kept"] < 20 and info["stride"] > 1
+    starts = [a for a, _ in info["windows_us"]]
+    assert starts[0] == 0 and starts[-1] >= 15_000                          # first call to near the last
+    assert starts == [1000 * i for i in range(0, 20, info["stride"])]
+    assert info["cpu_detail"] is True                                       # calls sampled before CPU detail
+    assert len(P._dump(small)) <= cap
 
 
 def test_write_part_traces(tmp_path):
@@ -145,6 +151,7 @@ def test_write_part_traces(tmp_path):
              {"part": "opt:opt.adamw", "names": ["opt:opt.adamw"]}]
     out = P.write_part_traces(trace_file, parts, tmp_path / "parts")
     assert out[0]["file"].endswith("1_fwd_block1.moe.dispatch.json") and out[0]["gpu_events"] == 1
+    assert out[0]["stride"] == 1 and out[0]["calls_kept"] == 1
     assert json.loads(open(out[0]["file"]).read())["traceEvents"]
     assert out[1]["file"] is None                                           # not in the trace: no file
 

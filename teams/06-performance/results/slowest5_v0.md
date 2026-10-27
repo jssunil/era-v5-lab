@@ -12,7 +12,7 @@ launches. Part 4 is the exception: the GPU is busy all the time, moving memory.
 
 | # | Part | ms | % of step | CPU time in trace | GPU kernel time in trace | Trace |
 |---|---|---:|---:|---:|---:|---|
-| 1 | `opt:opt.muon.ns` | 145.9 | 28.8% | 67.1 ms (47 of 189 matrices) | 8.1 ms | `runs/baseline_v0_parts/1_opt_opt.muon.ns.json` |
+| 1 | `opt:opt.muon.ns` | 145.9 | 28.8% | 67.1 ms (first 47 of 189 matrices) | 8.1 ms | `runs/baseline_v0_parts/1_opt_opt.muon.ns.json` |
 | 2 | `bwd:block*.grad` | 90.4 | 17.8% | 18.1 ms (layer 4) | 4.1 ms | `runs/baseline_v0_parts/2_bwd_block4.grad.json` |
 | 3 | `fwd:block*.moe.dispatch` | 50.6 | 10.0% | 8.6 ms (layer 4) | 1.3 ms | `runs/baseline_v0_parts/3_fwd_block4.moe.dispatch.json` |
 | 4 | `bwd:head+loss` | 48.2 | 9.5% | 1.4 ms | 48.1 ms | `runs/baseline_v0_parts/4_bwd_head+loss.json` |
@@ -23,8 +23,9 @@ Together: 381 ms, 75% of the step.
 ## 1. Muon Newton-Schulz: `opt:opt.muon.ns`, 146 ms (29%)
 
 - **What the trace shows:** Muon orthogonalizes each of the 189 block weight matrices separately: 5 iterations
-  of 3 small matmuls plus element-wise ops, about 49 kernel launches per matrix. In the 47 matrices kept in the
-  trace (the file is capped at 4.5 MB), the CPU takes 67 ms and the GPU 8 ms; the GPU waits between kernels.
+  of 3 small matmuls plus element-wise ops, about 43 kernel launches per matrix. The trace keeps the first 47
+  matrices (the file is capped at 4.5 MB), about the first half of the part. For those 47 the CPU takes 67 ms and
+  the GPU 8 ms; the GPU waits between kernels.
 - **Cause:** launch-bound. The matrices are small (8x256 up to 1024x256), and each runs alone.
 - **Supporting run:** the same model with AdamW instead of Muon runs 157 ms faster per step (what-if table below).
 - **Week-2 idea:** batch matrices of the same shape and run Newton-Schulz on the stack with `torch.bmm`. There
@@ -34,7 +35,8 @@ Together: 381 ms, 75% of the step.
 
 ## 2. Local backward of each reversible block: `bwd:block*.grad`, 90 ms (18%)
 
-- **What the trace shows:** layer 4's backward makes 613 kernel launches; the CPU takes 18.1 ms, the GPU 4.1 ms.
+- **What the trace shows:** layer 4's backward makes 386 kernel launches and 85 memsets (613 CUDA runtime
+  calls in all); the CPU takes 18.1 ms, the GPU 4.1 ms.
   The largest kernels are element-wise ops, reductions and a radix sort (from the MoE gather / `index_add_`
   backward), each under 1 ms.
 - **Cause:** launch-bound. Many small kernels per block: attention, 8 experts' MLPs, gathers and scatters, all
@@ -57,7 +59,7 @@ Together: 381 ms, 75% of the step.
 
 ## 4. Head and loss, backward: `bwd:head+loss`, 48 ms (10%)
 
-- **What the trace shows:** GPU-bound; the CPU queues 20 launches in 1.4 ms. `cunn_SoftMaxBackward` alone takes
+- **What the trace shows:** GPU-bound; the CPU queues 17 kernel launches in 1.4 ms. `cunn_SoftMaxBackward` alone takes
   25 ms, plus 15 ms of element-wise kernels. The fp32 logits are 16,384 x 131,072 = 8.6 GB. The softmax backward
   reads two such tensors and writes one, 25.8 GB in 25 ms: 1.0 TB/s, about 66% of the A100's 1.55 TB/s.
 - **Cause:** memory-bound. The full fp32 logits are built, stored and read back. Together with the forward

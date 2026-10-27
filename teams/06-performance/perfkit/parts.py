@@ -22,8 +22,9 @@ How a part is cut (the last profiled step; for a block part, the middle layer):
   GPU  the kernels, copies and memsets launched from those ranges, found through the correlation ID of the CUDA
        runtime calls (cudaLaunchKernel, ...) inside them; the GPU annotation ranges around those kernels; the
        launch arrows (ac2g flow events). So the file shows when the CPU queued the part and when the GPU ran it.
-Process and thread names (ph "M") are kept. A file over MAX_BYTES first loses the CPU events that are not
-annotations or CUDA runtime calls, then the later calls of a repeated region.
+Process and thread names (ph "M") are kept. A file over MAX_BYTES first keeps every 2nd, 4th, ... call of a
+repeated region (spread over the whole step, not its front half), then loses the CPU events that are not
+annotations or CUDA runtime calls.
 """
 from __future__ import annotations
 
@@ -154,29 +155,31 @@ def _dump(trace: dict) -> str:
 
 def cut_trace(trace: dict, name: str, max_bytes: int = MAX_BYTES) -> dict | None:
     """Region `name` of the last profiled step, as a Chrome trace dict under max_bytes; None if not in the trace.
-    era_part in the result says what was kept: calls_in_step / calls_kept, gpu_events (the kernels in the file),
-    cpu_detail, and gpu_events_truncated when even one call did not fit."""
+    era_part in the result says what was kept: calls_in_step / calls_kept / stride (every stride-th call, from
+    the first), gpu_events (the kernels in the file), cpu_detail, and gpu_events_truncated when even one call
+    did not fit."""
     windows = _windows(trace["traceEvents"], name)
     if not windows:
         return None
     calls = len(windows)
     for cpu_detail in (True, False):
-        w = windows
+        stride = 1
         while True:
+            w = windows[::stride]
             out = _cut(trace, w, cpu_detail)
             if len(_dump(out)) <= max_bytes:
-                out["era_part"].update(region=name, calls_in_step=calls, calls_kept=len(w))
+                out["era_part"].update(region=name, calls_in_step=calls, calls_kept=len(w), stride=stride)
                 return out
             if len(w) == 1:
                 break
-            w = w[:len(w) // 2]
+            stride *= 2
     out = _cut(trace, windows[:1], False)                 # one call, CPU skeleton: keep the first GPU events that fit
     keep = [e for e in out["traceEvents"] if e.get("cat") not in GPU_CATS]
     gpu = [e for e in out["traceEvents"] if e.get("cat") in GPU_CATS]
     while gpu and len(_dump({**out, "traceEvents": keep + gpu})) > max_bytes:
         gpu = gpu[:len(gpu) // 2]
     out["traceEvents"] = keep + gpu
-    out["era_part"].update(region=name, calls_in_step=calls, calls_kept=1, gpu_events=len(gpu),
+    out["era_part"].update(region=name, calls_in_step=calls, calls_kept=1, stride=calls, gpu_events=len(gpu),
                            gpu_events_truncated=True)
     return out
 
@@ -187,7 +190,8 @@ def _slug(name: str) -> str:
 
 def write_part_traces(trace_file, parts: list, out_dir, max_bytes: int = MAX_BYTES) -> list:
     """Cut one trace per part from trace_file into out_dir. Returns one entry per part:
-    {"part", "region", "file" (None when the region is not in the trace), "bytes", "calls_in_step", "calls_kept"}."""
+    {"part", "region", "file" (None when the region is not in the trace), "bytes", "calls_in_step", "calls_kept",
+    "stride", "gpu_events"}."""
     trace = json.loads(Path(trace_file).read_text())
     out_dir = Path(out_dir)
     written = []
@@ -202,6 +206,6 @@ def write_part_traces(trace_file, parts: list, out_dir, max_bytes: int = MAX_BYT
             path.write_text(text)
             info = cut["era_part"]
             entry.update(file=str(path), bytes=len(text), calls_in_step=info["calls_in_step"],
-                         calls_kept=info["calls_kept"], gpu_events=info["gpu_events"])
+                         calls_kept=info["calls_kept"], stride=info["stride"], gpu_events=info["gpu_events"])
         written.append(entry)
     return written
