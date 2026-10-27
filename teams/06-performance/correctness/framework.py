@@ -111,11 +111,40 @@ def to64(module):
     return copy.deepcopy(module).double()
 
 
+def _check_output_structure(ref, fast, tol):
+    """Check return structure and non-tensor metadata before tensor comparisons."""
+    if isinstance(ref, torch.Tensor) or isinstance(fast, torch.Tensor):
+        if not (isinstance(ref, torch.Tensor) and isinstance(fast, torch.Tensor)):
+            raise AssertionError("output type mismatch")
+    elif isinstance(ref, (tuple, list)) or isinstance(fast, (tuple, list)):
+        if type(ref) is not type(fast) or len(ref) != len(fast):
+            raise AssertionError("output structure mismatch")
+        for ref_item, fast_item in zip(ref, fast):
+            _check_output_structure(ref_item, fast_item, tol)
+    elif type(ref) is not type(fast):
+        raise AssertionError("non-tensor output type mismatch")
+    elif isinstance(ref, float):
+        if not (math.isfinite(ref) and math.isfinite(fast)
+                and math.isclose(ref, fast, rel_tol=tol, abs_tol=tol)):
+            raise AssertionError("non-tensor float output mismatch")
+    elif ref != fast:
+        raise AssertionError("non-tensor output mismatch")
+
+
 def _as_tensor_list(obj: Any) -> list[torch.Tensor]:
     if isinstance(obj, torch.Tensor):
         return [obj]
     if isinstance(obj, (tuple, list)):
-        tensors = [t for t in obj if isinstance(t, torch.Tensor)]
+        tensors = []
+
+        def collect(value):
+            if isinstance(value, torch.Tensor):
+                tensors.append(value)
+            elif isinstance(value, (tuple, list)):
+                for item in value:
+                    collect(item)
+
+        collect(obj)
         if not tensors:
             raise TypeError("output contained no tensors")
         return tensors
@@ -253,8 +282,11 @@ def check(p: Pair, device, fast_override=None) -> dict:
     ref_inputs = _clone_inputs(case.inputs, dtype=torch.float64, device=device)
     fast_inputs = _clone_inputs(case.inputs, dtype=p.dtype, device=device)
 
-    ref_tensors = _as_tensor_list(case.ref(*ref_inputs))
-    fast_tensors = _as_tensor_list(fast_fn(*fast_inputs))
+    ref_output = case.ref(*ref_inputs)
+    fast_output = fast_fn(*fast_inputs)
+    _check_output_structure(ref_output, fast_output, p.tol)
+    ref_tensors = _as_tensor_list(ref_output)
+    fast_tensors = _as_tensor_list(fast_output)
     if len(ref_tensors) != len(fast_tensors):
         raise AssertionError(
             f"{p.name}: output arity {len(fast_tensors)} vs {len(ref_tensors)}"

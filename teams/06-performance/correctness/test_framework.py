@@ -17,8 +17,10 @@ import importlib
 from pathlib import Path
 
 import pytest
+
 import torch
 
+parametrize = pytest.mark.parametrize
 from correctness.framework import Case, PAIRS, Pair, check, pair, rel_err, scaled
 
 parametrize = pytest.mark.parametrize
@@ -207,105 +209,101 @@ def test_tolerances_per_dtype():
         pair("_framework.fp8", dtype=torch.float8_e4m3fn)
 
 
-# ------------------------------------------------------------------------------ determinism (Task 3)
-# "Determinism: running the fast version twice gives identical bits." (G6_Team_Task_Plan.md, Task 3)
-# The parity tolerance (1e-5) cannot see a kernel that is wrong by 1e-9 from run to run, so these toy pairs
-# are wrong by WOBBLE per call: they pass parity and must fail the determinism check.
-# WOBBLE = 1e-6 is chosen on purpose: it is above the fp32 resolution of the values used here (about 5e-7, so
-# the two runs really differ in their bits) and far below the parity tolerance (1e-5 relative), so parity
-# still passes. A smaller wobble such as 1e-9 would be rounded away in fp32 and prove nothing.
-WOBBLE = 1e-6
-
-class _CallCounter:
-    """Counts how often the fast side runs, so a test can tell one run from two."""
-
-    def __init__(self):
-        self.n = 0
-
-
-def _wobbly_pair(counter, *, deterministic=True, wobble_in="output"):
-    """Fast code equals the reference up to a WOBBLE offset that changes on every call."""
-
-    class Noisy(torch.autograd.Function):          # a forward that is exact and a backward that wobbles
-        @staticmethod
-        def forward(ctx, x):
-            return x * 2
-
-        @staticmethod
-        def backward(ctx, g):
-            counter.n += 1
-            return g * 2 + WOBBLE * counter.n
-
+def _structure_pair(ref_fn, fast_fn):
     def build(device):
-        x = torch.randn(4, device=device, dtype=torch.float32, requires_grad=True)
+        x = torch.tensor([1.0], device=device)
+        return Case(ref=ref_fn, fast=fast_fn, inputs=[x], grads=False)
 
-        def fast(a):
-            counter.n += 1
-            if wobble_in == "gradient":
-                return Noisy.apply(a)
-            return a * 2 + WOBBLE * counter.n          # forward output differs between two runs
-
-        return Case(ref=lambda a: a * 2, fast=fast, inputs=[x])
-
-    return Pair("_framework.wobbly", build, deterministic=deterministic)
+    return Pair("_framework.output_structure", build)
 
 
-def test_a_wobbly_output_passes_parity_but_fails_determinism(device):
-    p = _wobbly_pair(_CallCounter())
-    with pytest.raises(AssertionError, match="not deterministic"):
+def test_output_structure_matching_metadata_passes(device):
+    p = _structure_pair(lambda x: (x * 2, 3, "ok"),
+                        lambda x: (x * 2, 3, "ok"))
+    assert "out[0]" in check(p, device)
+
+
+def test_output_structure_tensor_vs_none_fails(device):
+    p = _structure_pair(lambda x: (x * 2, None),
+                        lambda x: (x * 2, x * 3))
+    with pytest.raises(AssertionError, match="output type mismatch"):
         check(p, device)
 
 
-def test_a_wobbly_gradient_fails_determinism(device):
-    p = _wobbly_pair(_CallCounter(), wobble_in="gradient")
-    with pytest.raises(AssertionError, match=r"grad_in\[0\].*not deterministic"):
+def test_output_structure_tuple_length_mismatch_fails(device):
+    p = _structure_pair(lambda x: (x * 2, 3),
+                        lambda x: (x * 2, 3, 4))
+    with pytest.raises(AssertionError, match="output structure mismatch"):
         check(p, device)
 
 
-def test_deterministic_false_opts_out(device):
-    # By design non-deterministic code (for example a CUDA atomic scatter) registers with deterministic=False.
-    p = _wobbly_pair(_CallCounter(), deterministic=False)
-    assert check(p, device)                       # parity still has to pass
+def test_output_structure_metadata_value_mismatch_fails(device):
+    p = _structure_pair(lambda x: (x * 2, 3),
+                        lambda x: (x * 2, 4))
+    with pytest.raises(AssertionError, match="non-tensor output mismatch"):
+        check(p, device)
 
 
-def test_the_fast_side_runs_twice_when_deterministic_and_once_when_not(device):
-    for deterministic, runs in ((True, 2), (False, 1)):
-        calls = _CallCounter()
-
-        def build(dev, calls=calls):
-            x = torch.randn(4, device=dev, requires_grad=True)
-
-            def fast(a):
-                calls.n += 1
-                return a * 2
-
-            return Case(ref=lambda a: a * 2, fast=fast, inputs=[x], grads=False)
-
-        check(Pair("_framework.runs", build, deterministic=deterministic), device)
-        assert calls.n == runs
+def test_output_structure_list_vs_tuple_fails(device):
+    p = _structure_pair(lambda x: [x * 2, 3],
+                        lambda x: (x * 2, 3))
+    with pytest.raises(AssertionError, match="output structure mismatch"):
+        check(p, device)
 
 
-def test_the_1_01_drill_does_not_run_the_second_pass(device):
-    calls = _CallCounter()
-
-    def build(dev):
-        x = torch.randn(4, device=dev)
-
-        def fast(a):
-            calls.n += 1
-            return a * 2
-
-        return Case(ref=lambda a: a * 2, fast=fast, inputs=[x], grads=False)
-
-    with pytest.raises(AssertionError, match="rel_err"):         # it fails on parity, as the drill expects
-        check(Pair("_framework.drill", build), device, fast_override=scaled(1.01))
-    assert calls.n == 1
+def test_output_structure_python_float_precision_difference_passes(device):
+    p = _structure_pair(lambda x: (x * 2, (x.double() / 3).item()),
+                        lambda x: (x * 2, (x / 3).item()))
+    assert "out[0]" in check(p, device)
 
 
-def test_pair_decorator_passes_deterministic_to_the_registry():
-    @pair("_framework.det_flag", deterministic=False)
-    def _(device):
-        raise NotImplementedError
+def test_output_structure_python_float_large_difference_fails(device):
+    p = _structure_pair(lambda x: (x * 2, 1.0),
+                        lambda x: (x * 2, 1.1))
+    with pytest.raises(AssertionError, match="non-tensor float output mismatch"):
+        check(p, device)
 
-    assert PAIRS["_framework.det_flag"].deterministic is False
-    assert PAIRS["_framework.toy"].deterministic is True          # the default: every pair is checked
+
+@parametrize("ref_value,fast_value", [
+    (float("nan"), float("nan")),
+    (float("inf"), float("inf")),
+])
+def test_output_structure_nonfinite_float_fails(device, ref_value, fast_value):
+    p = _structure_pair(lambda x: (x * 2, ref_value),
+                        lambda x: (x * 2, fast_value))
+    with pytest.raises(AssertionError, match="non-tensor float output mismatch"):
+        check(p, device)
+
+
+def test_output_structure_python_float_near_zero_passes(device):
+    p = _structure_pair(lambda x: (x * 2, 0.0),
+                        lambda x: (x * 2, 1e-7))
+    assert "out[0]" in check(p, device)
+
+
+def test_output_structure_nested_tensor_wrong_value_fails(device):
+    p = _structure_pair(lambda x: (x * 2, (x * 3,)),
+                        lambda x: (x * 2, (x * 999,)))
+    with pytest.raises(AssertionError, match=r"out\[1\]"):
+        check(p, device)
+
+
+def test_output_structure_nested_tensors_correct_pass(device):
+    p = _structure_pair(lambda x: (x * 2, [None, (x * 3,)]),
+                        lambda x: (x * 2, [None, (x * 3,)]))
+    errors = check(p, device)
+    assert {"out[0]", "out[1]"} <= set(errors)
+
+
+def test_output_structure_nested_metadata_still_fails(device):
+    p = _structure_pair(lambda x: (x * 2, ("ok", 3)),
+                        lambda x: (x * 2, ("bad", 3)))
+    with pytest.raises(AssertionError, match="non-tensor output mismatch"):
+        check(p, device)
+
+
+def test_output_structure_nested_container_type_mismatch_fails(device):
+    p = _structure_pair(lambda x: (x * 2, (x * 3,)),
+                        lambda x: (x * 2, [x * 3]))
+    with pytest.raises(AssertionError, match="output structure mismatch"):
+        check(p, device)

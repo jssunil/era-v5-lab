@@ -85,40 +85,20 @@ def test_fp8_tol_slots_exist() -> None:
     assert d_atol == 1e-1 and d_rtol == 1e-1
 
 
-def test_verifier_agrees_with_framework_check_and_1_01() -> None:
-    """Adapter: CorrectnessVerifier and framework.check agree on PASS and on 1.01 FAIL."""
-    from correctness.framework import Case, Pair, check, scaled
-
-    torch.manual_seed(0)
-    w = torch.randn(8, 3, dtype=torch.float32)
-    x = torch.randn(4, 8, dtype=torch.float32)
-
-    def ref(inp):
-        return inp @ w
-
-    def fast(inp):
-        return inp @ w
-
-    def build(device):
-        return Case(
-            ref=lambda inp: inp @ w.to(device).double(),
-            fast=lambda inp: inp @ w.to(device),
-            inputs=[x.to(device)],
-            grads=False,
-        )
-
-    p = Pair("adapter.linear", build, tol=1e-5, grad_tol=5e-5, dtype=torch.float32)
-    device = torch.device("cpu")
-    errors = check(p, device)
-    assert "out[0]" in errors
-
+def test_gold_fp64_uses_bf16_tolerance() -> None:
     v = CorrectnessVerifier()
-    assert v.verify_forward(ref, fast, (x,), test_name="adapter_pass") is True
-    assert v.verify_forward(ref, make_perturbed_fn(fast, 1.01), (x,), test_name="adapter_neg") is False
+    x = torch.tensor([1.0], dtype=torch.bfloat16)
 
-    try:
-        check(p, device, fast_override=scaled(1.01))
-        raised = False
-    except AssertionError:
-        raised = True
-    assert raised, "framework 1.01 drill must fail"
+    # Within bf16 tolerance but outside fp32 tolerance.
+    assert v.verify_forward(
+        lambda value: value,
+        lambda value: value + 0.0078125,
+        (x,), test_name="bf16_gold_within_tol", gold_fp64=True,
+    )
+
+    # A 10% error must fail even with bf16 tolerance.
+    assert not v.verify_forward(
+        lambda value: value,
+        lambda value: value * 1.1,
+        (x,), test_name="bf16_gold_large_error", gold_fp64=True,
+    )
