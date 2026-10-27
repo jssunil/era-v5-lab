@@ -1,28 +1,28 @@
 # Medicine sheet: sci-finepdfs (jssunil)
 
-Written from the full-document diagnosis (`initial_diagnose.py` + `deep_diagnose.py`) of the first 500 rows of the pack (`sci-finepdfs.parquet`), following the criteria established in [DISEASES_DETAILED.md](../../DISEASES_DETAILED.md).
+Written from the full-document diagnosis (`initial_diagnose.py` + `deep_diagnose.py`) of the first 150 rows of the pack (`sci-finepdfs.parquet`), following the criteria established in [DISEASES_DETAILED.md](../../DISEASES_DETAILED.md).
 
-Diseases found across the 500 documents:
-- **B4 (Synthetic email placeholders & unrendered template parameters):** 121 documents
-- **C1 (Boilerplate running page headers/footers):** 93 documents
-- **F1 (Unredacted personal telephone numbers & clinical case histories):** 75 documents
-- **C3 (Truncated tables and document endings/beginnings):** 29 documents
-- **B2 (Raw HTML conversion tags: `<sup>`, `<sub>`, `<br>`):** 14 documents
-- **D1 / D3 (Wrong language label & bilingual French/German/Spanish/Cyrillic + English documents):** 7 documents
-- **A6 (Mixed Latin/Cyrillic homoglyphs inside words):** 3 documents
+Diseases found across the 150 documents:
+- **B4 (Synthetic email placeholders & unrendered template parameters):** 54 documents
+- **F1 (Unredacted personal telephone numbers & clinical case histories):** 39 documents
+- **C1 (Boilerplate running page headers/footers):** 38 documents
+- **C3 (Truncated tables and document endings/beginnings):** 12 documents
+- **B2 (Raw HTML conversion tags: `<sup>`, `<sub>`, `<br>`):** 6 documents
+- **D1 / D3 (Wrong language label & bilingual French/German/Spanish/Cyrillic + English documents):** 3 documents
 - **C4 (Two distinct letters/articles concatenated in one document):** 2 documents
+- **A6 (Mixed Latin/Cyrillic homoglyphs inside words):** 1 document
 
-Total documents analyzed: 500 (all marked `read=full`).
+Total documents analyzed: 150 (all marked `read=full`).
 Verdict distribution:
-- `clean`: 281 documents (56.2%)
-- `fix`: 219 documents (43.8%)
+- `clean`: 65 documents (43.3%)
+- `fix`: 85 documents (56.7%)
 - `drop`: 0 documents (0.0%)
 
 ---
 
 ## Medicine 1: C1 Boilerplate (Running Page Headers & Footers)
 
-1. **The disease:** `C1`, found in 93 of the 500 documents.
+1. **The disease:** `C1`, found in 38 of the 150 documents.
    Examples:
    - `8c1aed2f8a439b91` (row 1): `running header 'MIT Introduction to Deep Learn' repeated 8x, first at offset 56`
    - `50cc681aabd3d82b` (row 4): `synthetic placeholder at offset 219980 (1 total) | running header '* Denotes Non-Negotiable Trans' repeated 9x, first at offset 64206`
@@ -62,10 +62,10 @@ Verdict distribution:
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Tested across all 500 documents:
-     - Changes 93 of 500 documents (18.6%).
+   - Tested across all 150 documents:
+     - Changes 38 of 150 documents (25.3%).
      - Removes/modifies 0.934% of total text (passing the < 1% threshold).
-     - Changes **0 of the 281 clean documents** (0.0% harm on clean proxy).
+     - Changes **0 of the 65 clean documents** (0.0% harm on clean proxy).
 
 5. **The side effects:**
    - In slide decks, retaining the first instance keeps the title on slide 1, but strips it from later slides as intended.
@@ -74,7 +74,7 @@ Verdict distribution:
 
 ## Medicine 2: F1 Personal Data (Unredacted Telephone Numbers & Clinical Case Histories)
 
-1. **The disease:** `F1`, found in 75 of the 500 documents.
+1. **The disease:** `F1`, found in 39 of the 150 documents.
    Examples:
    - `6d2428a3ad8e41d6` (row 2): `synthetic placeholder at offset 1733 (1 total) | phone at offset 19088 (2 total)`
    - `507d7cf0978d22e4` (row 5): `synthetic placeholder at offset 12600 (112 total) | running header 'Member of Congress' repeated 243x, first at offset 107006 | phone at offset 119149 (1 total)`
@@ -99,10 +99,10 @@ Verdict distribution:
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Tested across all 500 documents:
-     - Changes 75 of 500 documents (15.0%).
+   - Tested across all 150 documents:
+     - Changes 39 of 150 documents (26.0%).
      - Removes/modifies 0.006% of total text (passing the < 1% threshold).
-     - Changes **0 of the 281 clean documents** (0.0% harm on clean proxy).
+     - Changes **0 of the 65 clean documents** (0.0% harm on clean proxy).
 
 5. **The side effects:**
    - Business contact numbers labeled 'Office Phone:' are redacted to <PHONE>, which is preferred for pre-training privacy.
@@ -111,7 +111,7 @@ Verdict distribution:
 
 ## Medicine 3: B4 Placeholders (Upstream Synthetic Redaction & Template Parameters)
 
-1. **The disease:** `B4`, found in 121 of the 500 documents.
+1. **The disease:** `B4`, found in 54 of the 150 documents.
    Examples:
    - `6d2428a3ad8e41d6` (row 2): `synthetic placeholder at offset 1733 (1 total) | phone at offset 19088 (2 total)`
    - `50cc681aabd3d82b` (row 4): `synthetic placeholder at offset 219980 (1 total) | running header '* Denotes Non-Negotiable Trans' repeated 9x, first at offset 64206`
@@ -135,10 +135,10 @@ Verdict distribution:
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Tested across all 500 documents:
-     - Changes 121 of 500 documents (24.2%).
+   - Tested across all 150 documents:
+     - Changes 54 of 150 documents (36.0%).
      - Removes/modifies 0.057% of total text (passing the < 1% threshold).
-     - Changes **0 of the 281 clean documents** (0.0% harm on clean proxy).
+     - Changes **0 of the 65 clean documents** (0.0% harm on clean proxy).
 
 5. **The side effects:**
    - A tutorial specifically explaining how to use example.com would have the domain replaced by <EMAIL>.
@@ -147,7 +147,7 @@ Verdict distribution:
 
 ## Medicine 4: C3 Truncated Documents (Broken Trailing Tables & Mid-Phrase Cutoffs)
 
-1. **The disease:** `C3`, found in 29 of the 500 documents.
+1. **The disease:** `C3`, found in 12 of the 150 documents.
    Examples:
    - `4f3067e9d3a6b2b8` (row 18): `table cut off at line '| 64 | ZINC ACETATE        ' offset 8085`
    - `4656c1ed1d4393c4` (row 24): `tag '<sub>' at offset 5912 (10 total) | running header 'Metal concentrations (mg/kg dw' repeated 6x, first at offset 3824 | table cut off at line '| R. Lapväärtinjoki | +       ' offset 16099`
@@ -169,10 +169,10 @@ Verdict distribution:
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Tested across all 500 documents:
-     - Changes 29 of 500 documents (5.8%).
+   - Tested across all 150 documents:
+     - Changes 12 of 150 documents (8.0%).
      - Removes/modifies 0.012% of total text (passing the < 1% threshold).
-     - Changes **0 of the 281 clean documents** (0.0% harm on clean proxy).
+     - Changes **0 of the 65 clean documents** (0.0% harm on clean proxy).
 
 5. **The side effects:**
    - Removes the last partial table row or dangling phrase when cut off at end of PDF.
@@ -181,7 +181,7 @@ Verdict distribution:
 
 ## Medicine 5: B2 HTML Tags (Scientific Subscripts & Line Breaks)
 
-1. **The disease:** `B2`, found in 14 of the 500 documents.
+1. **The disease:** `B2`, found in 6 of the 150 documents.
    Examples:
    - `7ea84af3398cb3ed` (row 16): `tag '<br>' at offset 445945 (5 total) | synthetic placeholder at offset 79870 (20 total) | running header '- **Date Approved:** 08/02/202' repeated 33x, first at offset 218309 | phone at offset 271034 (1 total)`
    - `50f74766355f26d3` (row 21): `tag '<sup>' at offset 9685 (14 total) | synthetic placeholder at offset 533 (4 total)`
@@ -204,10 +204,10 @@ Verdict distribution:
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Tested across all 500 documents:
-     - Changes 14 of 500 documents (2.8%).
+   - Tested across all 150 documents:
+     - Changes 6 of 150 documents (4.0%).
      - Removes/modifies 0.002% of total text (passing the < 1% threshold).
-     - Changes **0 of the 281 clean documents** (0.0% harm on clean proxy).
+     - Changes **0 of the 65 clean documents** (0.0% harm on clean proxy).
 
 5. **The side effects:**
    - Converting tags to ^ and _ preserves scientific gene superscripts and chemical subscripts.
@@ -216,11 +216,9 @@ Verdict distribution:
 
 ## Medicine 6: A6 Mixed Script Within a Word (Cyrillic/Latin OCR Homoglyphs)
 
-1. **The disease:** `A6`, found in 3 of the 500 documents.
+1. **The disease:** `A6`, found in 1 of the 150 documents.
    Examples:
    - `cdc5973ec2161f44` (row 75): `mixed Latin/Cyrillic word at offset 85429 | synthetic placeholder at offset 6043 (1 total)`
-   - `cdf797a70e6e37c0` (row 194): `mixed Latin/Cyrillic word at offset 170539 | synthetic placeholder at offset 3653 (1 total) | running header 'Source: SELDI Corruption Monit' repeated 8x, first at offset 14446 | French/Spanish/Cyrillic text at offset 127757 (176 segments) mixed with English at offset 0 (925 segments)`
-   - `49f48c49475a903a` (row 243): `mixed Latin/Cyrillic word at offset 13301 | Cyrillic text at offset 17 (8 segments) mixed with English at offset 171 (124 segments)`
 
 2. **The medicine:**
    - *In words:* Detect tokens mixing Latin and Cyrillic scripts within the same word (such as 'Ilonиемi', 'vrтoglavo', or 'АКУМУЛATOR') and normalize lookalike glyphs to the majority script of the word while exempting scientific Greek symbols.
@@ -238,10 +236,10 @@ Verdict distribution:
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Tested across all 500 documents:
-     - Changes 3 of 500 documents (0.6%).
-     - Removes/modifies 0.001% of total text (passing the < 1% threshold).
-     - Changes **0 of the 281 clean documents** (0.0% harm on clean proxy).
+   - Tested across all 150 documents:
+     - Changes 1 of 150 documents (0.7%).
+     - Removes/modifies < 0.001% of total text (passing the < 1% threshold).
+     - Changes **0 of the 65 clean documents** (0.0% harm on clean proxy).
 
 5. **The side effects:**
    - Pure Cyrillic words and standard Greek math/physics symbols remain untouched.
@@ -250,7 +248,7 @@ Verdict distribution:
 
 ## Medicine 7: D1/D3 Full-Document Language Verification & Bilingual Filtering
 
-1. **The disease:** `D1`, found in 7 of the 500 documents.
+1. **The disease:** `D1`, found in 3 of the 150 documents.
    Examples:
    - `51a4fb599da754db` (row 30): `French/German text at offset 0 (8 segments) mixed with English at offset 103 (149 segments) | starts mid-sentence 'langue, il est normal que nous rete' at offset 0 | secondary article 'Magdalen College, Oxford' at offset 21228 (line 183)`
    - `bfbe6f0f5d61c19e` (row 82): `phone at offset 8159 (2 total) | German text at offset 9463 (49 segments) mixed with English at offset 53 (280 segments)`
@@ -269,10 +267,10 @@ Verdict distribution:
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Tested across all 500 documents:
-     - Changes 7 of 500 documents (1.4%).
+   - Tested across all 150 documents:
+     - Changes 3 of 150 documents (2.0%).
      - Removes/modifies 0.045% of total text (passing the < 1% threshold).
-     - Changes **0 of the 281 clean documents** (0.0% harm on clean proxy).
+     - Changes **0 of the 65 clean documents** (0.0% harm on clean proxy).
 
 5. **The side effects:**
    - Preserves English abstracts, citations, and bilingual passages in multi-language academic PDFs.
@@ -281,7 +279,7 @@ Verdict distribution:
 
 ## Medicine 8: C4 Two Documents Joined (Multi-Article Journal Pages)
 
-1. **The disease:** `C4`, found in 2 of the 500 documents.
+1. **The disease:** `C4`, found in 2 of the 150 documents.
    Examples:
    - `51a4fb599da754db` (row 30): `French/German text at offset 0 (8 segments) mixed with English at offset 103 (149 segments) | starts mid-sentence 'langue, il est normal que nous rete' at offset 0 | secondary article 'Magdalen College, Oxford' at offset 21228 (line 183)`
    - `6acc7c94105bdebd` (row 32): `synthetic placeholder at offset 7142 (1 total) | clinical case history 'A 67-year-old woman' at offset 462 | cut off mid-phrase on 'such as the' at offset 9107 | secondary article 'To the Editor:' at offset 7299 (line 65)`
@@ -304,10 +302,10 @@ Verdict distribution:
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Tested across all 500 documents:
-     - Changes 2 of 500 documents (0.4%).
+   - Tested across all 150 documents:
+     - Changes 2 of 150 documents (1.3%).
      - Removes/modifies 0.015% of total text (passing the < 1% threshold).
-     - Changes **0 of the 281 clean documents** (0.0% harm on clean proxy).
+     - Changes **0 of the 65 clean documents** (0.0% harm on clean proxy).
 
 5. **The side effects:**
    - Preserves the primary article while cleanly separating concatenated secondary correspondence.
