@@ -89,7 +89,8 @@ def _register(name, n_kv_head, sdpa_gqa):
             pytest.skip("SDPA enable_gqa needs torch >= 2.5")
         fast_mod = _module(n_kv_head).to(device)
         ref_mod = to64(fast_mod)
-        x = torch.randn(B, T, N_EMBD, device=device, generator=torch.Generator(device=device).manual_seed(1))
+        x = torch.randn(B, T, N_EMBD, device=device,
+                        generator=torch.Generator(device=device).manual_seed(1)).requires_grad_(True)
 
         def fast(inp):
             return _with_sdpa_gqa(sdpa_gqa, lambda: fast_mod(inp))
@@ -112,10 +113,30 @@ _register("attention.causal.mqa_fallback", 1, sdpa_gqa=False)
 _register("attention.causal.lab_fallback", N_HEAD // 4, sdpa_gqa=False)
 
 
+@pair("attention.causal.bf16", dtype=torch.bfloat16)
+def _bf16_case(device):
+    fast_mod = _module(N_HEAD // 2).to(device)
+    ref_mod = to64(fast_mod)
+    x = torch.randn(B, T, N_EMBD, device=device,
+                    generator=torch.Generator(device=device).manual_seed(1)).requires_grad_(True)
+
+    def fast(inp):
+        with torch.autocast(device.type, dtype=torch.bfloat16):
+            return fast_mod(inp)
+
+    def ref(inp):
+        return naive_attention(inp, ref_mod.c_attn.weight, ref_mod.c_attn.bias,
+                               ref_mod.c_proj.weight, ref_mod.c_proj.bias, N_HEAD, N_HEAD // 2)
+
+    params = lambda m: [m.c_attn.weight, m.c_attn.bias, m.c_proj.weight, m.c_proj.bias]
+    return Case(ref=ref, fast=fast, inputs=[x], params_ref=params(ref_mod), params_fast=params(fast_mod))
+
+
 @parametrize("name", pairs_in(__name__))
 def test_pair(name, device):
     errors = check(PAIRS[name], device)
-    assert errors, f"{name}: check returned no errors, nothing was compared"
+    assert "out[0]" in errors and "grad_in[0]" in errors, f"{name}: output and input gradient must be compared"
+    assert len([k for k in errors if k.startswith("grad_param")]) == 4, f"{name}: all 4 param gradients must be compared"
 
 
 @parametrize("sdpa_gqa", [True, False], ids=["sdpa_gqa", "repeat_interleave"])

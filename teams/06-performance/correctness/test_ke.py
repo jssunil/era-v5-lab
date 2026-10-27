@@ -88,6 +88,28 @@ def make_case(mode, token_bytes, ids_fn):
     return build
 
 
+def make_bf16_case(mode):
+    """A Case: the fast module under bf16 autocast against the same fp64 reference (TOLERANCES[bfloat16])."""
+
+    def build(device):
+        tb, lens = random_table()
+        fast = KroneckerEmbedding((tb, lens), D_MODEL, P, mode).to(device)
+        w_ref = fast.proj.weight.detach().double().clone().requires_grad_(True)
+        ids = random_ids().to(device)
+
+        def ref(i):
+            kappa = reference_codec(tb, lens, i.reshape(-1).cpu()).to(i.device)
+            return (kappa @ w_ref.T).view(*i.shape, D_MODEL)
+
+        def fast_fn(i):
+            with torch.autocast(device.type, dtype=torch.bfloat16):
+                return fast(i)
+
+        return Case(ref=ref, fast=fast_fn, inputs=[ids], params_ref=[w_ref], params_fast=[fast.proj.weight])
+
+    return build
+
+
 def random_table():
     return token_bytes_random(VOCAB, P)
 
@@ -120,6 +142,9 @@ def edge_ids():
 for _mode in MODES:
     pair(f"ke1.{_mode}")(make_case(_mode, random_table, random_ids))
     pair(f"ke1.{_mode}.edge")(make_case(_mode, edge_table, edge_ids))
+    # bf16 autocast pair, like moe.<d>.bf16 in test_moe.py: tolerances from TOLERANCES[bfloat16], kept out
+    # of the 1.01 drill (a bf16 tolerance cannot catch a 1% error, framework.py: Precision).
+    pair(f"ke1.{_mode}.bf16", dtype=torch.bfloat16)(make_bf16_case(_mode))
 
 
 @parametrize("name", pairs_in(__name__))
@@ -129,7 +154,7 @@ def test_pair(name, device):
 
 
 def test_one_pair_per_mode_and_table():
-    assert sorted(pairs_in(__name__)) == sorted(f"ke1.{m}{s}" for m in MODES for s in ("", ".edge"))
+    assert sorted(pairs_in(__name__)) == sorted(f"ke1.{m}{s}" for m in MODES for s in ("", ".edge", ".bf16"))
 
 
 # ------------------------------------------------------------------------------ properties
@@ -177,8 +202,24 @@ def test_bytes_past_lens_are_ignored(mode, device):
 @parametrize("mode", MODES)
 def test_the_same_id_gives_the_same_vector(mode, device):
     ke = _module(mode, device)
-    out = ke(torch.tensor([[5, 9, 5]], device=device))
-    assert torch.equal(out[0, 0], out[0, 2]) and not torch.equal(out[0, 0], out[0, 1])
+    idx = torch.tensor([[5, 9, 5]], device=device)
+    kappa = ke.codec(idx)
+    assert torch.equal(kappa[0, 0], kappa[0, 2]) and not torch.equal(kappa[0, 0], kappa[0, 1])
+    out = ke(idx)
+    # In a batched GEMM (e.g. oneDNN on CPU), rows 0 and 2 of the batch can accumulate the 8192-wide
+    # dot product in slightly different registers, differing by ~1 ULP (~5e-7) despite identical codec rows.
+    assert rel_err(out[0, 0], out[0, 2]) < 1e-6 and rel_err(out[0, 0], out[0, 1]) > 0.1
+
+
+def test_real_brahmic_tokenizer_byte_table_codec(device):
+    from dataio.tokenizer import BrahmicTokenizer, VOCAB_SIZE
+    tb, lens = BrahmicTokenizer().token_bytes(P)
+    assert tb.shape == (VOCAB_SIZE, P) and lens.shape == (VOCAB_SIZE,)
+    # Boundary and multilingual token IDs from the 131072-token Brahmic vocabulary.
+    ids = torch.tensor([[0, 1, 66526, 2420, 13092, 732, VOCAB_SIZE - 1]], device=device)
+    ref = reference_codec(tb, lens, ids.reshape(-1).cpu(), P).to(device)
+    dyn = KroneckerEmbedding((tb, lens), D_MODEL, P, "dynamic").to(device)
+    assert rel_err(dyn.codec(ids).reshape(-1, N_BYTES * P), ref) < 1e-6
 
 
 @parametrize("mode", MODES)
