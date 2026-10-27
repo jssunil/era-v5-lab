@@ -42,13 +42,16 @@ docs/          PLAN.md (interfaces, what is done and left), PARTS.md (every part
 
 ## Status
 
-- **Done:** the lab model and data pipeline (earlier GPT-2 version verified on an A100; Brahmic timings pending), the
-  timing-marker API with markers in the model, the run JSON format, the test-pair registry, a smoke test, the step
-  timer and event recorders (`perfkit/timer.py`), the bench with clean, layer, trace, checkpoint and comm modes
-  (`perfkit/bench.py`, run on CPU so far), metrics and MFU (`perfkit/metrics.py`), the correctness checks in
-  `framework.py` with the 1.01 drill, and the attention test pairs.
-- **Left for Gate 1:** the other three test pairs (KE, MoE, reversible), the report with the 5% two-run comparison (`bench --against` is a console version),
-  `docs/METRICS.md`, then two baseline runs and `results/baseline_v0.md`, `results/slowest5_v0.md`.
+- **Done for Gate 1:** the lab model and data pipeline on the Brahmic vocabulary; the step timer, event recorders
+  and bench (`perfkit/timer.py`, `perfkit/bench.py`) with clean, layer, trace, checkpoint and comm modes, a small
+  trace per slowest part and GPU system metrics; `--repeat` with each run in its own process; metrics and MFU
+  (`perfkit/metrics.py`, `docs/METRICS.md`); the correctness framework with the 1.01 drill and determinism check,
+  and test pairs for attention, KE, MoE, reversible and the whole model (fp32 and bf16, plus chunked loss).
+- **Baseline v0 (A100-SXM4-40GB, commit `f1f4986`):** 507 ms per step, MFU 3.3%; two runs agree within 3.6% on
+  every gated part ([`results/baseline_v0.md`](results/baseline_v0.md)). The five slowest parts, each with a trace
+  and a week-2 idea: [`results/slowest5_v0.md`](results/slowest5_v0.md).
+- **Left:** the KE2 pair (waits for G4's decode reference), the MoE all-to-all timed on 2 GPUs (`torchrun`),
+  `perfkit/roofline.py`.
 
 **Distributed optimizer follow-up:** the current Muon/AdamW implementation is local-process only. A DDP integration is implementable follow-up work: make parameter selection robust to the DDP `module.` prefix (or build from the unwrapped module), handle MoE experts unused on a rank, and add a multi-process correctness/smoke test. The current optimizer should not be treated as tested for DDP or ZeRO-style sharding.
 
@@ -127,7 +130,7 @@ python -m perfkit.smoke --steps 20 --warmup 5 optim.name=muon
 python -m perfkit.smoke --steps 20 --warmup 5 optim.name=polar_muon_adamw
 ```
 
-No timing results are published yet for the Brahmic vocabulary.
+Timing results for the Brahmic vocabulary: [`results/baseline_v0.md`](results/baseline_v0.md).
 
 **7. Bench** (per-part timing; Gate 1 numbers come from here, on committed code)
 

@@ -12,6 +12,8 @@ The one place these numbers are computed: perfkit.bench calls it, and G8 gets th
     gpu_telemetry(device)          SM clock, temperature, power, throttle reasons from nvidia-smi (None off CUDA)
     telemetry_during(device, work) the same, sampled while work() keeps the GPU busy
     throttle_flags(tel)            slowdown reasons in a sample (power cap, thermal, ...), None if not reported
+    GpuSampler(device)             GPU utilization, memory, clocks, power, temperature sampled through the clean
+                                   steps (run["system"], for G8)
 
 FLOPs per token (T = sequence length, L = layers, d = width, N_active from GPT.param_counts):
     model_flops_per_token = 6 * N_active + 12 * L * d * T      (PaLM; attention scores counted non-causal)
@@ -20,14 +22,15 @@ FLOPs per token (T = sequence length, L = layers, d = width, N_active from GPT.p
                             + optimizer FLOPs per step (Muon Newton-Schulz) / tokens per step
 MFU uses model FLOPs, HFU hardware FLOPs; both against the dense vendor peak for the dtype the run used.
 
-Extra, still to write: goodput (time and tokens, badput buckets), NVML sampler thread (util, power, SM clock,
-temperature during the run), HBM GB/s per GPU for the roofline.
+Extra, still to write: goodput (time and tokens, badput buckets), HBM GB/s per GPU for the roofline.
 """
 from __future__ import annotations
 
 import os
 import platform
+import shutil
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 
@@ -89,28 +92,40 @@ def _sh(args, cwd=None):
 
 def git_state():
     """(commit, dirty). Dirty = any change in teams/06-performance outside results/, new files included
-    (a new module the bench imports is code the commit ID does not name)."""
+    (a new module the bench imports is code the commit ID does not name). Not counted: __pycache__,
+    .pytest_cache, .ipynb_checkpoints, .DS_Store (they appear without anyone editing code).
+    dirty is None when git status cannot run; commit is then PERF_COMMIT when there is no .git."""
     commit = _sh(["git", "rev-parse", "HEAD"], cwd=ROOT)
     if commit is None:                    # e.g. a Colab upload without .git
         return os.environ.get("PERF_COMMIT"), None
-    status = _sh(["git", "status", "--porcelain", "--untracked-files=normal", "--", ".", ":(exclude)results"],
-                 cwd=ROOT)
+    # Python and pytest caches, notebook checkpoints (Colab) and Finder files (macOS) are not code: they appear
+    # without anyone editing a file (no .gitignore covers them, and pr-guard allows none in the team folder).
+    status = _sh(["git", "status", "--porcelain", "--untracked-files=all", "--", ".", ":(exclude)results",
+                  ":(exclude,glob)**/__pycache__/**", ":(exclude,glob)**/.pytest_cache/**",
+                  ":(exclude,glob)**/.ipynb_checkpoints/**", ":(exclude,glob)**/.DS_Store"], cwd=ROOT)
     return commit, bool(status) if status is not None else None
 
 
 _SMI = "name,driver_version,pstate,clocks.sm,clocks.max.sm,clocks.mem,temperature.gpu,power.draw,power.limit"
 
 
+def _smi_select(device) -> str:
+    """The nvidia-smi --id for this device, by PCI bus ID: nvidia-smi and CUDA may number GPUs differently."""
+    try:
+        props = torch.cuda.get_device_properties(device)
+        dom, bus, dv = (getattr(props, f"pci_{k}_id", None) for k in ("domain", "bus", "device"))
+    except (AssertionError, RuntimeError):
+        dom = bus = dv = None
+    if all(isinstance(v, int) for v in (dom, bus, dv)):
+        return f"--id={dom:08X}:{bus:02X}:{dv:02X}.0"
+    return f"--id={device.index or 0}"
+
+
 def gpu_telemetry(device) -> dict | None:
     """SM clock, temperature and power now: explains a 5% miss on a shared or hot GPU."""
     if device.type != "cuda":
         return None
-    props = torch.cuda.get_device_properties(device)
-    dom, bus, dv = (getattr(props, f"pci_{k}_id", None) for k in ("domain", "bus", "device"))
-    if all(isinstance(v, int) for v in (dom, bus, dv)):       # nvidia-smi and CUDA may number GPUs differently
-        sel = f"--id={dom:08X}:{bus:02X}:{dv:02X}.0"
-    else:
-        sel = f"--id={device.index or 0}"
+    sel = _smi_select(device)
     out = _sh(["nvidia-smi", sel, f"--query-gpu={_SMI}", "--format=csv,noheader,nounits"])
     if not out:
         return None
@@ -121,7 +136,7 @@ def gpu_telemetry(device) -> dict | None:
             res[k] = v if k in ("name", "driver_version", "pstate") else float(v)
         except ValueError:
             res[k] = v
-    for field in ("clocks_event_reasons.active", "clocks_throttle_reasons.active"):   # new name, old name
+    for field in REASON_FIELDS:
         r = _sh(["nvidia-smi", sel, f"--query-gpu={field}", "--format=csv,noheader"])
         if r:
             try:
@@ -130,6 +145,9 @@ def gpu_telemetry(device) -> dict | None:
             except ValueError:
                 pass
     return res
+
+
+REASON_FIELDS = ("clocks_event_reasons.active", "clocks_throttle_reasons.active")   # new name, old name
 
 
 # nvidia-smi clock event reasons that mean the GPU was slowed down. GpuIdle (0x1), application clocks (0x2),
@@ -162,6 +180,95 @@ def telemetry_during(device, work, delay_s: float = 0.2) -> dict | None:
     work()
     t.join(timeout=30)
     return box.get("tel")
+
+
+# nvidia-smi query field -> key in run["system"]["metrics"] (docs/METRICS.md says what each one means)
+SAMPLE_FIELDS = {"utilization.gpu": "gpu_util_pct", "utilization.memory": "mem_util_pct",
+                 "memory.used": "mem_used_mib", "clocks.sm": "sm_clock_mhz", "clocks.mem": "mem_clock_mhz",
+                 "power.draw": "power_w", "temperature.gpu": "temp_c"}
+
+
+class GpuSampler:
+    """System metrics while the measured steps run, for G8 (docs/METRICS.md).
+
+        with GpuSampler(device) as s:
+            run_clean(...)
+        run["system"] = s.summary()        # None off CUDA or without nvidia-smi
+
+    One nvidia-smi child process in loop mode (--loop-ms) writes one sample per interval to a temp file. Nothing
+    runs in this process, so the timed steps pay only the child's own CPU (one sample a second by default).
+    summary(): min / median / max / mean of every SAMPLE_FIELDS metric, and how many samples had a slowdown
+    reason (SLOWDOWN) active, with their names.
+    """
+
+    def __init__(self, device, interval_ms: int = 1000):
+        self.device, self.interval_ms = device, interval_ms
+        self.fields = list(SAMPLE_FIELDS)
+        self.reason = None
+        self.started = False
+        self.rows = []
+        self._proc = self._file = None
+
+    def __enter__(self):
+        if self.device.type != "cuda" or shutil.which("nvidia-smi") is None:
+            return self
+        sel = _smi_select(self.device)
+        self.reason = next((f for f in REASON_FIELDS
+                            if _sh(["nvidia-smi", sel, f"--query-gpu={f}", "--format=csv,noheader"])), None)
+        query = self.fields + ([self.reason] if self.reason else [])
+        self._file = tempfile.TemporaryFile(mode="w+")
+        self._proc = subprocess.Popen(["nvidia-smi", sel, f"--query-gpu={','.join(query)}",
+                                       "--format=csv,noheader,nounits", f"--loop-ms={self.interval_ms}"],
+                                      stdout=self._file, stderr=subprocess.DEVNULL, text=True)
+        self.started = True
+        return self
+
+    def __exit__(self, *exc):
+        if self._proc is None:
+            return False
+        self._proc.terminate()
+        try:
+            self._proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._proc.kill()
+            self._proc.wait()
+        self._file.seek(0)
+        self.rows = [r for r in map(self.parse_line, self._file.read().splitlines()) if r]
+        self._file.close()
+        self._proc = self._file = None
+        return False
+
+    def parse_line(self, line: str) -> dict | None:
+        """One CSV line -> {field: float, reason field: int}; None for a line with the wrong number of values."""
+        query = self.fields + ([self.reason] if self.reason else [])
+        vals = [v.strip() for v in line.split(",")]
+        if len(vals) != len(query):
+            return None
+        row = {}
+        for f, v in zip(query, vals):
+            try:
+                row[f] = int(v, 16) if f == self.reason else float(v)
+            except ValueError:                        # [N/A], [Not Supported]
+                row[f] = None
+        return row
+
+    def summary(self) -> dict | None:
+        if not self.started:
+            return None
+        from perfkit.timer import stats
+        out = {"source": f"nvidia-smi --loop-ms={self.interval_ms}", "interval_ms": self.interval_ms,
+               "during": "clean steps", "samples": len(self.rows), "metrics": {}}
+        for f, key in SAMPLE_FIELDS.items():
+            vals = [r[f] for r in self.rows if r.get(f) is not None]
+            if vals:
+                st = stats(vals)
+                out["metrics"][key] = {k: st[k] for k in ("min", "median", "max", "mean")}
+        if self.reason:
+            flagged = [f for r in self.rows if r.get(self.reason) is not None
+                       and (f := throttle_flags({"throttle_reasons": r[self.reason]}))]
+            out["slowdown_samples"] = len(flagged)
+            out["slowdown_reasons"] = sorted({n for names in flagged for n in names})
+        return out
 
 
 def run_metadata(device) -> dict:

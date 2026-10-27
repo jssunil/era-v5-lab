@@ -15,6 +15,7 @@ GELU and cross-entropy by formula; naive GQA attention (test_attention.naive_att
 Pairs (outputs logits and loss; every parameter gradient):
   model.lab_small        configs/lab_small.yaml, fp32. The reference routes by itself, so the router is checked too.
   model.base             configs/base.yaml (table embedding with tied head, dense MLP, plain stack), fp32.
+  model.lab_small.chunked  lab_small with model.ce_impl=chunked, fp32: loss only (no logits), every gradient.
   model.lab_small.bf16   lab_small under bf16 autocast, TOLERANCES[bfloat16]. In bf16 a few tokens go to other
                          experts than in fp64 (4 of 128 here), and a flipped token makes the expert gradients
                          noise (13-26%). So this reference REPLAYS the fast routing (the expert choice only, from
@@ -74,8 +75,8 @@ def _batch(device):
     return buf[:, :-1].contiguous(), buf[:, 1:].contiguous()
 
 
-def _model(config, device):
-    mcfg = model_config(load_config(ROOT / "configs" / config))
+def _model(config, device, overrides=()):
+    mcfg = model_config(load_config(ROOT / "configs" / config, overrides))
     torch.manual_seed(SEED)
     tb = _token_bytes(mcfg.ke_max_pos) if mcfg.embedding == "ke1" else None
     model = GPT(mcfg, tb).to(device).train()
@@ -164,10 +165,10 @@ def _params(m):
 
 
 # ------------------------------------------------------------------ pairs
-def _fp32_pair(name, config):
-    @pair(name)
+def _fp32_pair(name, config, overrides=(), grad_tol=None):
+    @pair(name, grad_tol=grad_tol)
     def build(device):
-        fast, mcfg = _model(config, device)
+        fast, mcfg = _model(config, device, overrides)
         ref = to64(fast)
         idx, targets = _batch(device)
         if mcfg.ffn == "moe":
@@ -176,6 +177,13 @@ def _fp32_pair(name, config):
                 ref_forward(ref, mcfg, idx, targets, margins=margins)
             low = torch.cat(margins).min().item()
             assert low > MIN_MARGIN, f"{name}: routing near tie (margin {low:.1e}); change SEED"
+        if mcfg.ce_impl == "chunked":                 # chunked returns no logits with targets: compare the loss
+            def fast_fn(i, t):
+                logits, loss = fast(i, t)
+                assert logits is None, "ce_impl=chunked must not build the logits"
+                return loss
+            return Case(ref=lambda i, t: ref_forward(ref, mcfg, i, t)[1], fast=fast_fn,
+                        inputs=[idx, targets], params_ref=_params(ref), params_fast=_params(fast))
         return Case(ref=lambda i, t: ref_forward(ref, mcfg, i, t), fast=lambda i, t: fast(i, t),
                     inputs=[idx, targets], params_ref=_params(ref), params_fast=_params(fast))
     return build
@@ -183,6 +191,14 @@ def _fp32_pair(name, config):
 
 _fp32_pair("model.lab_small", "lab_small.yaml")
 _fp32_pair("model.base", "base.yaml")
+# The out-of-memory fallback (README, bench): head + cross-entropy in ce_chunks checkpointed pieces. Its loss and
+# every gradient against the same fp64 reference; the head is recomputed in backward, so the head gradient too.
+# grad_tol 1e-4, measured: the ln_f.weight gradient is 6.2e-5 off fp64 (ln_f.bias 3.8e-5), and the SAME 6.2e-5
+# without chunking when the head runs as a 2-D matmul. The gradient reaching ln_f is (softmax - onehot) @ W, an
+# fp32 sum over 131072 vocabulary rows, and the ln_f.weight gradient then cancels to a third of its terms.
+# model.lab_small passes 5e-5 only because its 3-D head matmul takes a BLAS kernel that rounds differently.
+# Still 100x below the 1.01 drill (1e-2).
+_fp32_pair("model.lab_small.chunked", "lab_small.yaml", ["model.ce_impl=chunked"], grad_tol=1e-4)
 
 
 @pair("model.lab_small.bf16", dtype=torch.bfloat16)

@@ -50,8 +50,26 @@ Report and G8 must use the value already stored in the run JSON, not recompute a
 differs from `meta.commit`. A dirty run is not a named commit: treat baselines from dirty trees
 as non-authoritative until the tree is clean.
 
+## System metrics (`run["system"]`, CUDA runs)
+
+`perfkit.metrics.GpuSampler` runs `nvidia-smi --loop-ms=1000` in a child process while the clean steps run
+(the steps that give step time, tokens/s and MFU), so the samples describe the same steps. Each metric has
+`min`, `median`, `max`, `mean` over the samples.
+
+| Key | nvidia-smi field | Meaning |
+|---|---|---|
+| `gpu_util_pct` | `utilization.gpu` | % of the sample period in which at least one kernel ran. Not SM occupancy: one tiny kernel at a time reads 100%. Use `trace.gpu_busy_pct` for idle gaps between kernels. |
+| `mem_util_pct` | `utilization.memory` | % of the sample period in which device memory was read or written |
+| `mem_used_mib` | `memory.used` | device memory in use, all processes (the allocator's own peak is `memory.peak_allocated_gb`) |
+| `sm_clock_mhz`, `mem_clock_mhz` | `clocks.sm`, `clocks.mem` | clocks; compare with `meta.telemetry_start["clocks.max.sm"]` |
+| `power_w`, `temp_c` | `power.draw`, `temperature.gpu` | board power and GPU temperature |
+
+`slowdown_samples` / `slowdown_reasons`: samples in which the driver reported a power cap, thermal or hardware
+slowdown (`SLOWDOWN` in `metrics.py`; idle and application clocks are not slowdowns). Any slowdown sample adds
+a run warning: such a run may miss the 5% check. Off CUDA, or without `nvidia-smi`, there is no `system` section.
+
 ## Shared run JSON
 
 `perfkit.schema.REQUIRED` lists every field report and G8 expect under `meta`, `config`, `clean`,
-and `metrics` (plus `layer` / `trace` when those modes ran). Renaming or removing a required key
+and `metrics` (plus `layer` / `trace` when those modes ran, `system` on CUDA). Renaming or removing a required key
 breaks consumers — agree it before changing.

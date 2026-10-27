@@ -121,8 +121,12 @@ layer:     level, overhead_pct, step_ms, step_ms_recorder_off,
            regions { "<phase>:<name>": {median,p10,p90,iqr,n,level,calls_per_step} }  [each region: pass]
            [data_host_ms, data_note, events_per_step, steps, events_created_while_measuring,
             inner_pass {level, overhead_pct, step_ms, step_ms_recorder_off, events_per_step}]
-trace:     trace_file, top_ops, gpu_busy_pct, kernels_per_step   [parts { "<name>": {file, top_kernels} }]
-           [steps, host_syncs_per_step, sync_sites]
+trace:     trace_file, top_ops, gpu_busy_pct, kernels_per_step
+           [steps, host_syncs_per_step, sync_sites, parts_note,
+            parts [{part, ms, pct, instances, level, region, file, bytes, calls_in_step, calls_kept, gpu_events}]]
+[system]:  source, interval_ms, during, samples,                 CUDA only, sampled through the clean steps
+           metrics {gpu_util_pct, mem_util_pct, mem_used_mib, sm_clock_mhz, mem_clock_mhz, power_w, temp_c:
+                    {min, median, max, mean}}  [slowdown_samples, slowdown_reasons]
 metrics:   tokens_per_step, tokens_per_s, mfu, params_total, params_active, model_flops_per_token,
            peak_tflops                                           [hfu, hw_flops_per_token, model_tflops_per_s]
 [memory]:  peak_allocated_gb, peak_reserved_gb
@@ -134,7 +138,7 @@ metrics:   tokens_per_step, tokens_per_s, mfu, params_total, params_active, mode
 ```
 
 `perfkit/schema.py` (`REQUIRED`, `REGION_KEYS`) is the source of truth; this is a copy. `[...]` = optional.
-meta, config, clean and metrics are always there; layer and trace only when that mode ran.
+meta, config, clean and metrics are always there; layer and trace only when that mode ran; system only on CUDA.
 `bwd:stack` is the whole stack backward in both stacks, like `fwd:stack` (`perfkit/bench.py` step 6).
 New fields can be added; existing ones are not renamed without telling the team and G8.
 
