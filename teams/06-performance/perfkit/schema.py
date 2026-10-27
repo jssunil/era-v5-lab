@@ -12,14 +12,15 @@ from __future__ import annotations
 STATS = ("median", "p10", "p90", "iqr", "n")
 
 # section -> required keys (dotted paths inside the section). "meta", "config", "clean", "metrics" are
-# always required; "layer" and "trace" only when that mode ran. A key with no value (cuda and driver on a
-# CPU run) is present with value None.
+# always required; "layer" and "trace" only when that mode ran, "system" only on CUDA. A key with no value
+# (cuda and driver on a CPU run) is present with value None.
 REQUIRED = {
     "meta": ["gpu", "gpu_spec", "torch", "cuda", "driver", "device", "commit", "dirty", "config_file", "overrides", "tag", "time"],
     "config": ["run", "data", "model", "optim", "bench"],
     "clean": [*(f"step_ms.{s}" for s in STATS), *(f"data_ms.{s}" for s in STATS)],
     "layer": ["level", "overhead_pct", "step_ms.median", "step_ms_recorder_off.median", "regions"],
     "trace": ["trace_file", "top_ops", "gpu_busy_pct", "kernels_per_step"],
+    "system": ["source", "samples", "metrics"],           # CUDA only: perfkit.metrics.GpuSampler, for G8
     "metrics": ["tokens_per_step", "tokens_per_s", "mfu", "params_total", "params_active",
                 "model_flops_per_token", "peak_tflops"],
 }

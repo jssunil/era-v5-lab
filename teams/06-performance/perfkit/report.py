@@ -84,10 +84,16 @@ def _seq_len(run: dict):
 
 
 def _refuse(a: dict, b: dict) -> list[str]:
+    """Why two runs cannot be a baseline pair. Besides the work and the GPU, both runs must time the SAME
+    committed code: one commit, and a clean tree (dirty is False; None means it could not be checked)."""
     problems = []
-    for k in ("gpu", "vocab_size"):
+    for k in ("gpu", "vocab_size", "commit"):
         if a.get("meta", {}).get(k) != b.get("meta", {}).get(k):
             problems.append(f"different {k}: {a.get('meta', {}).get(k)} vs {b.get('meta', {}).get(k)}")
+    for run in (a, b):
+        meta = run.get("meta", {})
+        if meta.get("dirty") is not False:
+            problems.append(f"run {meta.get('tag')}: dirty={meta.get('dirty')}: not a clean git checkout of the commit")
     if _dtype(a) != _dtype(b):
         problems.append(f"different dtype: {_dtype(a)} vs {_dtype(b)}")
     if _batch_size(a) != _batch_size(b):

@@ -31,12 +31,16 @@ Do not use torch.allclose defaults: in bf16 (rtol 1.6e-2) they let a 1% error pa
 Precision (TOLERANCES, measured on the full lab_small model, correctness/test_model.py):
   fp32  clean errors: outputs <= 3e-7, gradients <= 1.9e-5 (after 30 training steps). A KE bug that changes
         the embedding by 6e-5 shows 9e-6 in the logits but 1.2e-4 in the gradients: so outputs 1e-5,
-        gradients 5e-5. These pairs are in the 1.01 drill (test_framework.py).
+        gradients 5e-5. These pairs are in the 1.01 drill (test_framework.py). model.lab_small.chunked uses 1e-4:
+        its ln_f gradient is an fp32 sum over the 131072-token vocabulary (6.2e-5, test_model.py).
   bf16  lab_small under CPU bf16 autocast, MoE routing replayed (test_model.py), T = 64 and 512 alike: outputs
         3.8e-3, gradients <= 1.3e-2 (router; attention and LayerNorm ~1e-2, experts 8e-3). So outputs 1e-2,
         gradients 3e-2. Without the replay a few tokens change experts and expert gradients are off by up to
         26%. A bf16 tolerance cannot catch a 1% error, so bf16 pairs are NOT in the 1.01 drill; they catch
-        large bf16 regressions. Measure again on the A100 before trusting them for GPU runs.
+        large bf16 regressions.
+        Measured again on an A100-SXM4-40GB (torch 2.11, CUDA 13.0, 27 Oct): model.lab_small.bf16 outputs 4.1e-3,
+        gradients 9.4e-3; moe.loop.bf16 4.9e-3 / 5.8e-3; fp32 pairs at most 4.1e-7 / 1.4e-6. All inside the
+        tolerances above with 2.4x (bf16 outputs) to 37x (fp32 gradients) to spare.
   fp8   no fp8 code yet. Add an entry here, with the measurement, when an fp8 path exists.
 """
 from __future__ import annotations

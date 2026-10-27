@@ -464,7 +464,46 @@ def test_parse_repeat_defaults_to_one_run():
     assert bench.parse(["--config", "c.yaml", "--repeat", "2"])[0].repeat == 2
 
 
-def test_repeat_writes_one_json_per_run_and_passes_when_they_agree(tmp_path, capsys):
+def _in_process_repeats(monkeypatch):
+    """Later --repeat runs normally start a new Python process (bench.repeat_run), which would not see the fake
+    Loader. Here they run in this process, through the same arguments repeat_cmd builds."""
+    calls = []
+
+    def run(argv, tag, against=None):
+        calls.append((tag, against))
+        a, ov = bench.parse(bench.repeat_cmd(argv, tag, against)[3:])
+        return bench.run_once(a, ov)[0]
+    monkeypatch.setattr(bench, "repeat_run", run)
+    return calls
+
+
+def test_repeat_cmd_is_one_run_with_a_new_tag_against_the_first():
+    cmd = bench.repeat_cmd(["--config", "c.yaml", "--tag", "x", "--repeat", "3", "run.seed=1"], "x-run2",
+                           Path("runs/x.json"))
+    assert cmd[1:3] == ["-m", "perfkit.bench"]
+    a, ov = bench.parse(cmd[3:])
+    assert (a.repeat, a.tag, a.against, ov) == (1, "x-run2", str(Path("runs/x.json")), ["run.seed=1"])
+    assert "--against" not in bench.repeat_cmd(["--config", "c.yaml"], "x", None)       # the first run
+
+
+def test_repeat_runs_every_run_in_a_child_and_the_first_without_against(tmp_path, monkeypatch):
+    calls = _in_process_repeats(monkeypatch)
+    _run_main(tmp_path / "runs", "kids", "--modes", "clean", "--repeat", "2", "report.tol_pct=1000")
+    assert [c[0] for c in calls] == ["kids", "kids-run2"]               # the parent ran nothing itself
+    assert calls[0][1] is None and Path(calls[1][1]).name == "kids.json"
+
+
+def test_repeat_fails_when_a_later_run_is_killed(tmp_path, monkeypatch, capsys):
+    calls = _in_process_repeats(monkeypatch)
+    real = bench.repeat_run
+    monkeypatch.setattr(bench, "repeat_run", lambda argv, tag, against=None: real(argv, tag, against) if not calls
+                        else -9)                              # run 2 killed by a signal (out-of-memory killer)
+    code = _run_main(tmp_path / "runs", "killed", "--modes", "clean", "--repeat", "2", "report.tol_pct=1000")
+    assert code == 1 and "PASS" not in capsys.readouterr().out
+
+
+def test_repeat_writes_one_json_per_run_and_passes_when_they_agree(tmp_path, capsys, monkeypatch):
+    _in_process_repeats(monkeypatch)
     # report.tol_pct=1000: the two tiny CPU runs differ by noise, so the test must not depend on the 5% value.
     code = _run_main(tmp_path / "runs", "rep", "--modes", "clean", "--repeat", "2", "report.tol_pct=1000")
     assert code == 0
@@ -486,6 +525,7 @@ def test_repeat_fails_with_exit_code_2_when_the_second_run_is_slower(tmp_path, m
         return clean, loss, mem
 
     monkeypatch.setattr(bench, "run_clean", slower_second_time)
+    _in_process_repeats(monkeypatch)
     code = _run_main(tmp_path / "runs", "slow", "--modes", "clean", "--repeat", "2")
     assert code == 2
     assert "repeat: 2 runs against slow.json: FAIL" in capsys.readouterr().out
@@ -500,3 +540,40 @@ def test_run_json_has_mean_and_std_for_the_step(tmp_path):
     _run_main(tmp_path / "runs", "stats", "--modes", "clean")
     step = json.loads((tmp_path / "runs" / "stats.json").read_text())["clean"]["step_ms"]
     assert step["mean"] > 0 and step["std"] >= 0 and step["median"] > 0
+
+
+# ------------------------------------------------------------------------------ slowest parts and their traces
+
+def test_trace_with_layer_writes_one_small_trace_per_slowest_part(tmp_path):
+    from perfkit.parts import MAX_BYTES
+    code = _run_main(tmp_path / "runs", "traced", "--modes", "clean,layer,trace", "--level", "3")
+    run = json.loads((tmp_path / "runs" / "traced.json").read_text())
+    assert code == 0 and validate_run(run) == []
+    parts = run["trace"]["parts"]
+    assert len(parts) == 5 and [p["ms"] for p in parts] == sorted((p["ms"] for p in parts), reverse=True)
+    for p in parts:
+        assert p["file"], f"no trace for {p['region']}"
+        path = Path(p["file"])
+        assert path.parent.name == "traced_parts" and path.stat().st_size <= MAX_BYTES
+        events = json.loads(path.read_text())["traceEvents"]
+        assert any(e.get("name") == p["region"] or str(e.get("name", "")).startswith("__point__") for e in events)
+    assert not any(w.startswith("no trace cut") for w in run["warnings"])
+
+
+def test_trace_without_layer_says_why_there_are_no_parts(tmp_path):
+    _run_main(tmp_path / "runs", "nolayer", "--modes", "clean,trace")
+    tr = json.loads((tmp_path / "runs" / "nolayer.json").read_text())["trace"]
+    assert "parts" not in tr and "layer" in tr["parts_note"]
+    assert not (tmp_path / "runs" / "nolayer_parts").exists()
+
+
+def test_no_system_section_off_cuda(first_run):
+    assert "system" not in first_run["run"]
+
+
+def test_rule_checks_flag_an_unknown_dirty_state():
+    run = _checked_run(dirty=None, commit="8ea01e8+local")         # a zip upload: PERF_COMMIT set, no .git
+    for r in run["layer"]["regions"].values():
+        r["spread_pct"] = 1.0
+    out = "\n".join(bench.rule_checks(run, ["clean", "layer", "checkpoint", "comm"], _cfg()))
+    assert "could not tell whether the code is committed" in out

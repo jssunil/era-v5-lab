@@ -28,6 +28,7 @@ Lab setting: 1 shared expert (always on) + top-2 routed of 8 (configs/lab_small.
     Gates are always recomputed from the router scores, so the router still gets its gradient.
   * DISPATCH = {"loop": dispatch_loop}: per-expert gather -> expert -> index_add_.
     Keeps its host syncs (tok.any(), nonzero): it is the baseline we measure, not something to hide.
+    The token counts come from one compare-and-sum over topk_idx (no sync).
   * Regions (level 3): f"{name}.router", f"{name}.dispatch", f"{name}.dispatch.expert{e}", f"{name}.shared".
 
 Extra: "dense" dispatch (every expert on every token, exact, slow), capacity factor, aux / z loss.
@@ -61,7 +62,9 @@ class ExpertMLP(nn.Module):
 def dispatch_loop(moe, x, topk_idx, gates):
     """x [N, dim], topk_idx [N, k], gates [N, k] -> (out [N, dim], counts [num_experts])."""
     out = torch.zeros_like(x)
-    counts = torch.zeros(moe.num_experts, device=x.device)
+    # No host sync: a per-expert `counts[e] = idx.numel()` copied a host int to the GPU (1 sync each), and
+    # torch.bincount on CUDA reads max() back to size its output. Compare-and-sum needs neither, and no atomics.
+    counts = (topk_idx.reshape(-1, 1) == torch.arange(moe.num_experts, device=x.device)).sum(0).float()
     for e in range(moe.num_experts):
         with region(f"{moe.name}.dispatch.expert{e}", 3):
             pos = topk_idx == e
@@ -70,7 +73,6 @@ def dispatch_loop(moe, x, topk_idx, gates):
                 continue
             idx = tok.nonzero(as_tuple=True)[0]                 # host sync
             w = (gates * pos.to(gates.dtype)).sum(dim=1)
-            counts[e] = idx.numel()
             out.index_add_(0, idx, moe.experts[e](x[idx]) * w[idx].unsqueeze(1).to(x.dtype))
     return out, counts
 

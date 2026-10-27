@@ -18,6 +18,11 @@ than 5%"): run the whole benchmark N times, each from scratch (new model, new lo
 per run (<tag>.json, <tag>-run2.json, ...) and compare every later run with the first one, exactly as
 --against does. The exit code is 2 when any gated part differs by more than report.tol_pct. These are the
 two runs that baseline_v0.md needs. One GPU only (not under torchrun).
+Every run, the first one too, is a NEW Python process (repeat_run), and the process that starts them never
+touches the GPU. Measured on an A100: a second run in the same process, after the first run's profiler (trace
+mode), was 26% slower on every host-bound part (blocks, Muon) and equal on the GPU-bound ones; two separate
+processes agreed within 2.5%. And a second process started while the first still held its GPU memory ran out of
+memory. Without --tag the runs are named <config>_repeat_<time>.
 
 What a run does (the numbered steps of the original stub)
   1. load_config + model_config; device (run.device auto: cuda, else mps, else cpu); seed everything.
@@ -44,11 +49,14 @@ What a run does (the numbered steps of the original stub)
      perfkit.schema.validate_run must return [] (exit code 1 otherwise).
 
 Modes (bench.modes; clean always runs: meta, config, clean and metrics are required)
-  clean       step time, data time, memory, tokens/s, MFU / HFU
+  clean       step time, data time, memory, tokens/s, MFU / HFU; on CUDA, GPU utilization, memory, clocks,
+              power and temperature sampled through the clean steps (run["system"], perfkit.metrics.GpuSampler)
   layer       every part of the step at its level, recorder overhead
   trace       torch.profiler over bench.trace_steps steps with the region names: Chrome trace in
               ~/.cache/era-perf/traces/ (outside the repo), top GPU ops, GPU busy %, kernels per step,
-              host syncs per step and the source lines that cause them
+              host syncs per step and the source lines that cause them. With layer mode too: the five
+              slowest parts (perfkit.parts) and one small trace per part in <out_dir>/<tag>_parts/ (committed,
+              for results/slowest5_v0.md), listed in trace.parts
   checkpoint  save model + optimizer + scaler state: ms (GPU -> CPU copy, write + fsync), MB, MB/s.
               Written to ~/.cache/era-perf/ckpt/ and deleted after.
   comm        MoE expert-parallel all-to-all with this config's real payload. Needs 2+ GPUs under
@@ -65,7 +73,8 @@ Instructor rules this follows (G6 group, 25 Oct)
   Compute: everything runs on Colab, Kaggle or your own GPU; tiny_cpu.yaml runs on a laptop.
 
 Exit codes: 0 ok, 1 run JSON incomplete, 2 --against found a part outside tol_pct, 3 out of memory,
-4 no data.
+4 no data. With --repeat: 2 when any later run is outside tol_pct; a run that ends with any other code, or is
+killed by a signal (out-of-memory killer), stops the repeat with its code (1 for a signal), never a PASS.
 """
 from __future__ import annotations
 
@@ -76,6 +85,7 @@ import math
 import os
 import random
 import re
+import subprocess
 import sys
 import time
 from collections import deque
@@ -94,6 +104,7 @@ from models.config import load_config, model_config  # noqa: E402
 from models.gpt import GPT  # noqa: E402
 from models.optim import build_optimizer  # noqa: E402
 from perfkit import metrics as M  # noqa: E402
+from perfkit import parts as P  # noqa: E402
 from perfkit import timer as T  # noqa: E402
 from perfkit.regions import phase, point, region, use_recorder  # noqa: E402
 from perfkit.schema import validate_run  # noqa: E402
@@ -601,6 +612,16 @@ def summary(run: dict, gate_level: int) -> str:
             lines.append(f"MoE all-to-all not measured ({a2a['reason']}); {a2a['payload_mb_per_call']:.1f} MB/call, "
                          f"{a2a['calls_per_step']} calls/step")
     tr = run.get("trace")
+    if tr and tr.get("parts"):
+        lines.append("\nslowest parts (summed over layers):")
+        for i, p in enumerate(tr["parts"], 1):
+            lines.append(f"  {i}. {p['part']:<40}{_f(p['ms'], 2):>10} ms{_f(p['pct'], 1):>7}%  trace {p['file'] or '-'}")
+    sy = run.get("system")
+    if sy:
+        mt = sy["metrics"]
+        get = lambda k: _f((mt.get(k) or {}).get("median"), 0)
+        lines.append(f"GPU during clean ({sy['samples']} samples): util {get('gpu_util_pct')}%  mem {get('mem_used_mib')} MiB  "
+                     f"SM {get('sm_clock_mhz')} MHz  {get('power_w')} W  {get('temp_c')} C")
     if tr and tr.get("gpu_busy_pct") is None:
         lines.append(f"trace (CPU run: no GPU numbers) -> {tr['trace_file']}")
     elif tr:
@@ -649,13 +670,19 @@ def quick_compare(a: dict, b: dict, tol_pct: float, gate_level: int) -> tuple:
     return rows, ok, problems
 
 
-def write_run(run: dict, out_dir: Path, tag: str) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
+def free_path(out_dir: Path, tag: str) -> Path:
+    """<tag>.json, or <tag>-2.json, -3 ... when it exists: a run never overwrites another."""
     path = out_dir / f"{tag}.json"
     i = 2
     while path.exists():
         path = out_dir / f"{tag}-{i}.json"
         i += 1
+    return path
+
+
+def write_run(run: dict, out_dir: Path, tag: str, path: Path | None = None) -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = path or free_path(out_dir, tag)
     path.write_text(json.dumps(_finite(run), indent=1, default=str, allow_nan=False) + "\n")
     return path
 
@@ -711,8 +738,7 @@ def parse(argv):
 def run_once(a, overrides):
     """One complete benchmark run. Returns (exit code, path of the run JSON or None).
 
-    This is the body of the old main(); it now also returns the path of the JSON it wrote, so --repeat
-    can pass the first run to the later ones as --against."""
+    This is the body of the old main(). Each --repeat run calls it in its own process (repeat_run)."""
     cfg = load_config(a.config, overrides)
     mcfg = model_config(cfg)              # fail early on a bad config
     b = cfg["bench"]
@@ -778,7 +804,14 @@ def run_once(a, overrides):
         tel0 = M.gpu_telemetry(device)
 
         print("[bench] clean ...", flush=True)
-        run["clean"], loss, mem = run_clean(s, b["steps"])
+        with M.GpuSampler(device) as sampler:
+            run["clean"], loss, mem = run_clean(s, b["steps"])
+        system = sampler.summary()
+        if system:
+            run["system"] = system
+            if system.get("slowdown_samples"):
+                warns.append(f"{system['slowdown_samples']} of {system['samples']} samples during the clean steps had "
+                             f"a slowdown reason ({', '.join(system['slowdown_reasons'])}): may miss the 5% check")
         meta["loss_end"] = float(loss)
         if mem:
             run["memory"] = mem
@@ -833,8 +866,12 @@ def run_once(a, overrides):
     problems = validate_run(run)
 
     gate = cfg.get("report", {}).get("gate_level", 2)
+    out_dir = ROOT / Path(b["out_dir"]).expanduser()                    # relative = inside teams/06-performance
+    path = free_path(out_dir, tag)
+    if run.get("trace"):
+        part_traces(run, path.parent / f"{path.stem}_parts", warns)
     print(summary(run, gate))
-    path = write_run(run, ROOT / Path(b["out_dir"]).expanduser(), tag)   # relative = inside teams/06-performance
+    path = write_run(run, out_dir, tag, path)
     print(f"\n[bench] run JSON -> {_show(path)}")
     try:
         from perfkit import report
@@ -864,7 +901,49 @@ def run_once(a, overrides):
     return code, path
 
 
-HARD_ERRORS = (1, 3, 4)       # incomplete JSON, out of memory, no data: a repeat cannot compare these
+def part_traces(run: dict, out_dir: Path, warns: list):
+    """The five slowest parts (from layer mode) and one small trace each, cut from the full trace (perfkit.parts)."""
+    tr = run["trace"]
+    if not run.get("layer"):
+        tr["parts_note"] = "no layer mode in this run: the slowest parts and their traces need --modes layer,trace"
+        return
+    ranked = P.slowest_parts(run["layer"]["regions"], run["clean"]["step_ms"]["median"])
+    try:
+        cut = P.write_part_traces(tr["trace_file"], ranked, out_dir)
+    except (OSError, ValueError) as e:                 # no trace file (export failed) or a broken one
+        warns.append(f"could not cut the part traces from {tr['trace_file']}: {e}")
+        cut = None
+    for p, c in zip(ranked, cut or [{"region": P.instance(p), "file": None} for p in ranked]):
+        p.pop("names")
+        p.update(c)
+        if p["file"]:
+            p["file"] = _show(Path(p["file"]))
+    tr["parts"] = ranked
+    missing = [p["region"] for p in ranked if not p["file"]]
+    if missing and cut is not None:                    # the file failed: already said above, not per region
+        warns.append(f"no trace cut for {', '.join(missing)}: the region is not in the trace")
+
+
+def _hard(code: int) -> bool:
+    """A --repeat child that cannot be compared: 1 incomplete JSON (or a crash), 3 out of memory, 4 no data, or a
+    kill by a signal (negative code, e.g. -9 from the out-of-memory killer). Only 0 (ok) and 2 (outside tol_pct)
+    are verdicts."""
+    return code not in (0, 2)
+
+
+def repeat_cmd(argv, tag: str, against=None) -> list:
+    """The command line of one --repeat run: the same arguments, one run, its own tag, --against when given.
+    argparse keeps the last value of a repeated flag, so appending overrides the user's --tag / --repeat."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    cmd = [sys.executable, "-m", "perfkit.bench", *argv, "--repeat", "1", "--tag", tag]
+    return cmd + (["--against", str(against)] if against else [])
+
+
+def repeat_run(argv, tag: str, against=None) -> int:
+    """One --repeat run in a new Python process (module docstring: why). Returns its exit code."""
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(filter(None, [str(ROOT), os.environ.get("PYTHONPATH")]))}
+    print(f"\n[bench] repeat: {tag} in a new process", flush=True)
+    return subprocess.run(repeat_cmd(argv, tag, against), env=env).returncode
 
 
 def main(argv=None):
@@ -872,18 +951,20 @@ def main(argv=None):
     a, overrides = parse(argv)
     if a.repeat <= 1 or int(os.environ.get("WORLD_SIZE", "1")) > 1:     # torchrun is for --modes comm only
         return run_once(a, overrides)[0]
-    code, first = run_once(a, overrides)
-    if code in HARD_ERRORS or first is None:
-        return code
+    # The parent only starts the runs and never touches the GPU, so every run has the whole GPU to itself. (A parent
+    # that ran run 1 itself kept ~30 GB reserved on a 40 GB A100, and run 2 ran out of memory.)
+    out_dir = ROOT / Path(load_config(a.config, overrides)["bench"]["out_dir"]).expanduser()
+    first = free_path(out_dir, a.tag or f"{Path(a.config).stem}_repeat_{_dt.datetime.now():%Y%m%d-%H%M%S}")
+    code = repeat_run(argv, first.stem, a.against)
+    if _hard(code) or not first.exists():
+        return code if code > 0 else 1
     codes = [code]
     for k in range(2, a.repeat + 1):
-        again, again_ov = parse(argv)                     # a fresh namespace for every run
-        again.tag = f"{first.stem}-run{k}"                # <tag>-run2, <tag>-run3 ... next to the first JSON
-        again.against = str(first)                        # every later run is checked against the first
-        code, _ = run_once(again, again_ov)
+        # <tag>-run2, <tag>-run3 ... next to the first JSON; every later run is checked against the first
+        code = repeat_run(argv, f"{first.stem}-run{k}", first)
         codes.append(code)
-        if code in HARD_ERRORS:
-            return code
+        if _hard(code):
+            return code if code > 0 else 1
     verdict = 2 if 2 in codes else 0
     # The same word the single run prints for --against, so a log reader finds one verdict per kind of check.
     print(f"\n[bench] repeat: {a.repeat} runs against {first.name}: {'FAIL' if verdict else 'PASS'}")
@@ -917,7 +998,11 @@ def rule_checks(run: dict, modes: list, cfg: dict) -> list:
     if me.get("dirty"):
         out.append("uncommitted changes: Gate 1 numbers must come from committed code")
     if me.get("commit") is None:
-        out.append("no commit ID (no .git): set PERF_COMMIT=<sha> so the run names its code")
+        out.append("no commit ID (no .git): Gate 1 numbers need a git checkout of committed code; for other runs, "
+                   "set PERF_COMMIT=<sha> so the run at least names its code")
+    elif me.get("dirty") is None:
+        out.append("could not tell whether the code is committed (no .git, or git status failed): Gate 1 numbers "
+                   "must come from a git checkout of committed code")
     if me["vocab_size"] != BRAHMIC_VOCAB or (me.get("tokenizer") or {}).get("vocab_size") != BRAHMIC_VOCAB:
         out.append(f"rule 1a: timings must use the BrahmicTokenizer-131K vocabulary ({BRAHMIC_VOCAB}); "
                    f"this run used model.vocab_size={me['vocab_size']}")
