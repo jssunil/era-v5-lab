@@ -38,7 +38,7 @@ from models.ke1 import MODES, N_BYTES, KroneckerEmbedding, kronecker_codec, toke
 # (the at sign followed by pytest dot mark dot something) has that shape, so the PR was blocked. Giving the
 # two decorators a plain name once, here, keeps the tests identical and the guard quiet.
 parametrize = pytest.mark.parametrize
-contract_gap = pytest.mark.xfail(strict=True, reason=(
+contract_gap = pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
     "models/ke1.py says L is 'the number of bytes (truncated to P)', but kronecker_codec uses the raw lens in "
     "1/sqrt(L) when lens > P (it differs by about 2e-4 for L = 40, P = 32). The tokenizer refuses tokens longer "
     "than ke_max_pos, so real runs never reach this; fix the code or the docstring, then remove this xfail."))
