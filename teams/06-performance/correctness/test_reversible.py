@@ -152,3 +152,22 @@ def test_bf16_grad_agrees_with_plain(device):
         g_ref = x_ref.grad.detach().float()
     err = rel_err(g_fast, g_ref)
     assert err < 1e-3, f"bf16 grad rel_err={err:.3e}"
+
+
+@parametrize("rev_h", [0.5, 1.0])
+def test_step_size_h_scales_update_and_inversion(rev_h, device):
+    blocks = _blocks("mlp", N_LAYER_PAIR, seed=8).to(device)
+    for blk in blocks:
+        blk.h = rev_h
+    x = torch.randn(B, T, N_EMBD, device=device,
+                    generator=torch.Generator(device=device).manual_seed(9)).requires_grad_(True)
+    y_fast = ReversibleStack.apply(x, blocks)
+    blocks_ref = to64(blocks)
+    x_ref = x.detach().double().requires_grad_(True)
+    y_ref = plain_forward(x_ref, blocks_ref)
+    assert rel_err(y_fast, y_ref) < 1e-5
+    y_fast.sum().backward()
+    y_ref.sum().backward()
+    assert rel_err(x.grad, x_ref.grad) < 5e-5
+    with torch.no_grad():
+        assert reconstruction_error(x.detach(), blocks) < 1e-4
