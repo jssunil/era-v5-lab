@@ -21,6 +21,8 @@ import torch
 
 from correctness.framework import Case, PAIRS, Pair, check, pair, rel_err, scaled
 
+parametrize = pytest.mark.parametrize
+
 
 def _import_all_test_modules() -> None:
     here = Path(__file__).resolve().parent
@@ -133,7 +135,7 @@ def test_wrong_shape_fails(device):
         check(p, device)
 
 
-@pytest.mark.parametrize("name", sorted(n for n, p in PAIRS.items() if p.drill))
+@parametrize("name", sorted(n for n, p in PAIRS.items() if p.drill))
 def test_every_registered_pair_scaled_fails(name, device):
     with pytest.raises(AssertionError):
         check(PAIRS[name], device, fast_override=scaled(1.01))

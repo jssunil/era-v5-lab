@@ -38,6 +38,9 @@ from models.config import load_config, model_config
 from test_attention import naive_attention
 from models.gpt import GPT
 
+cache = functools.cache
+parametrize = pytest.mark.parametrize
+
 ROOT = Path(__file__).resolve().parents[1]
 B, T, SEED = 2, 64, 0
 HEAD_SCALE = 10       # head weights x10: the softmax is peaked (max p ~0.4) instead of uniform over 131072
@@ -53,13 +56,13 @@ TEXT = (
 )
 
 
-@functools.cache
+@cache
 def _tokenizer():
     from dataio.tokenizer import BrahmicTokenizer
     return BrahmicTokenizer()
 
 
-@functools.cache
+@cache
 def _token_bytes(max_pos):
     return _tokenizer().token_bytes(max_pos)
 
@@ -204,7 +207,7 @@ def _lab_bf16(device):
                 inputs=[idx, targets], params_ref=_params(ref), params_fast=_params(fast))
 
 
-@pytest.mark.parametrize("name", pairs_in(__name__))
+@parametrize("name", pairs_in(__name__))
 def test_pair(name, device):
     errors = check(PAIRS[name], device)
     assert len([k for k in errors if k.startswith("grad_param")]) > 100, f"{name}: too few gradients compared"

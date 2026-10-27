@@ -33,6 +33,8 @@ import torch
 from models.moe import SparseMoE, record_routing, replay_routing
 from perfkit.regions import phase, region
 
+no_grad = torch.no_grad
+
 
 def _autocast_state(device_type):
     try:
@@ -74,7 +76,7 @@ def plain_forward(x, blocks):
     return b
 
 
-@torch.no_grad()
+@no_grad()
 def reconstruction_error(x, blocks) -> float:
     po, co, routes = _forward_recording(blocks, x)
     for i in reversed(range(len(blocks))):
