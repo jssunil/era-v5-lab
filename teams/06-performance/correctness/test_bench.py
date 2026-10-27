@@ -451,3 +451,49 @@ def test_main_against_exit_codes(tmp_path, first_run, capsys):
 def test_main_rejects_an_unknown_mode(tmp_path):
     with pytest.raises(SystemExit):
         _run_main(tmp_path / "runs", "x", "--modes", "clean,nonsense")
+
+
+# ------------------------------------------------------------------------------ --repeat (Task 2)
+# "Automatically run the benchmark twice and fail if any part differs by more than 5%."
+
+def test_parse_repeat_defaults_to_one_run():
+    assert bench.parse(["--config", "c.yaml"])[0].repeat == 1
+    assert bench.parse(["--config", "c.yaml", "--repeat", "2"])[0].repeat == 2
+
+
+def test_repeat_writes_one_json_per_run_and_passes_when_they_agree(tmp_path, capsys):
+    # report.tol_pct=1000: the two tiny CPU runs differ by noise, so the test must not depend on the 5% value.
+    code = _run_main(tmp_path / "runs", "rep", "--modes", "clean", "--repeat", "2", "report.tol_pct=1000")
+    assert code == 0
+    # <tag>.json is run 1; <tag>-run2.json is run 2, checked against run 1.
+    assert sorted(p.name for p in (tmp_path / "runs").glob("*.json")) == ["rep-run2.json", "rep.json"]
+    out = capsys.readouterr().out
+    assert "repeat: 2 runs against rep.json: PASS" in out
+    assert validate_run(json.loads((tmp_path / "runs" / "rep-run2.json").read_text())) == []
+
+
+def test_repeat_fails_with_exit_code_2_when_the_second_run_is_slower(tmp_path, monkeypatch, capsys):
+    real, calls = bench.run_clean, {"n": 0}
+
+    def slower_second_time(s, n):
+        clean, loss, mem = real(s, n)
+        calls["n"] += 1
+        if calls["n"] == 2:                      # only the second run: 50% slower, far above the 5% limit
+            clean["step_ms"]["median"] *= 1.5
+        return clean, loss, mem
+
+    monkeypatch.setattr(bench, "run_clean", slower_second_time)
+    code = _run_main(tmp_path / "runs", "slow", "--modes", "clean", "--repeat", "2")
+    assert code == 2
+    assert "repeat: 2 runs against slow.json: FAIL" in capsys.readouterr().out
+
+
+def test_without_repeat_one_json_is_written(tmp_path):
+    assert _run_main(tmp_path / "runs", "single", "--modes", "clean") in (0, 2)
+    assert [p.name for p in (tmp_path / "runs").glob("*.json")] == ["single.json"]
+
+
+def test_run_json_has_mean_and_std_for_the_step(tmp_path):
+    _run_main(tmp_path / "runs", "stats", "--modes", "clean")
+    step = json.loads((tmp_path / "runs" / "stats.json").read_text())["clean"]["step_ms"]
+    assert step["mean"] > 0 and step["std"] >= 0 and step["median"] > 0

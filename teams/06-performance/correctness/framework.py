@@ -20,6 +20,12 @@ fast code. fp32 tolerances < 1e-2 always (so a 1.01 error fails).
     AssertionError naming the pair, the tensor, the error and the tolerance. Returns {name: error}, and
     records the worst errors in RESULTS (conftest prints them at the end of the run).
   * scaled(k=1.01): returns a wrapper factory; check applies fast_override(case.fast). Outputs * k.
+  * determinism (Task 3 of G6_Team_Task_Plan.md, decision D02): after the parity checks, check() runs the fast
+    side a SECOND time on fresh copies of the same inputs, with the same cotangent, and requires the outputs
+    and the gradients to be bit-identical (torch.equal). The parity tolerance cannot see this: a kernel that
+    is wrong by 1e-9 from run to run passes parity but breaks reproducible training and the 5% repeat check.
+    A pair whose fast code is non-deterministic by design (CUDA atomics, e.g. an index_add_ scatter) opts out
+    with @pair(..., deterministic=False) and says why in a comment. The 1.01 drill (fast_override) skips it.
 Do not use torch.allclose defaults: in bf16 (rtol 1.6e-2) they let a 1% error pass.
 
 Precision (TOLERANCES, measured on the full lab_small model, correctness/test_model.py):
@@ -69,6 +75,8 @@ class Pair:
     tol: float = DEFAULT_TOL
     grad_tol: float | None = None    # None: TOLERANCES[dtype] gradient tolerance
     dtype: torch.dtype = torch.float32
+    # Task 3: True = check() also requires two identical runs of the fast code to give identical bits.
+    deterministic: bool = True
 
     @property
     def gtol(self) -> float:
@@ -79,7 +87,7 @@ class Pair:
         return self.tol < DRILL_TOL and self.gtol < DRILL_TOL
 
 
-def pair(name, tol=None, grad_tol=None, dtype=torch.float32):
+def pair(name, tol=None, grad_tol=None, dtype=torch.float32, deterministic=True):
     assert dtype in TOLERANCES, f"{name}: no tolerances for {dtype}; measure them and add them to TOLERANCES"
     tol = TOLERANCES[dtype][0] if tol is None else tol
     grad_tol = TOLERANCES[dtype][1] if grad_tol is None else grad_tol
@@ -88,7 +96,7 @@ def pair(name, tol=None, grad_tol=None, dtype=torch.float32):
 
     def deco(fn):
         assert name not in PAIRS, f"duplicate pair {name}"
-        PAIRS[name] = Pair(name, fn, tol, grad_tol, dtype)
+        PAIRS[name] = Pair(name, fn, tol, grad_tol, dtype, deterministic)
         return fn
     return deco
 
@@ -222,6 +230,49 @@ def _grad_or_zeros(t: torch.Tensor) -> torch.Tensor:
     return t.grad if t.grad is not None else torch.zeros_like(t)
 
 
+def _check_determinism(p: Pair, case: Case, fast_fn, fast_inputs: list, fast_tensors: list, device) -> None:
+    """Task 3: run the fast side a second time and require the same bits.
+
+    Called by check() after the parity checks, when the first fast run has left its outputs in fast_tensors
+    and its gradients in .grad of the fast inputs and params_fast. We keep copies of those, clear the
+    gradients, run the fast code again on FRESH copies of the same inputs, push the SAME seeded cotangent
+    back, and compare with torch.equal (exact, not a tolerance). Nothing here touches the reference.
+    """
+    first_out = [t.detach().clone() for t in fast_tensors]
+    watched = [(f"grad_in[{i}]", t) for i, t in enumerate(fast_inputs)
+               if isinstance(t, torch.Tensor) and t.requires_grad]
+    watched += [(f"grad_param[{i}]", t) for i, t in enumerate(case.params_fast)]
+    first_grad = {n: _grad_or_zeros(t).detach().clone() for n, t in watched} if case.grads else {}
+
+    _zero_grads([t for _, t in watched])
+    inputs2 = _clone_inputs(case.inputs, dtype=p.dtype, device=device)
+    out2 = _as_tensor_list(fast_fn(*inputs2))
+
+    def same(name, a, b):
+        if not torch.equal(a, b.detach()):
+            worst = (a.double() - b.detach().double()).abs().max().item()
+            raise AssertionError(f"{p.name}: {name}: two identical runs of the fast code differ "
+                                 f"(max abs diff {worst:.3e}): not deterministic. If that is by design "
+                                 f"(CUDA atomics), register the pair with deterministic=False and say why.")
+
+    if len(out2) != len(first_out):
+        raise AssertionError(f"{p.name}: the second fast run returned {len(out2)} tensors, the first {len(first_out)}")
+    for i, (a, b) in enumerate(zip(first_out, out2)):
+        same(f"out[{i}]", a, b)
+    if not case.grads:
+        return
+
+    diff = [t for t in out2 if t.requires_grad]
+    gen = torch.Generator().manual_seed(0)           # the same cotangent as check() uses for the parity pass
+    cot = [torch.randn(t.shape, dtype=torch.float64, generator=gen) for t in diff]
+    torch.autograd.backward(diff, [g.to(t.device, t.dtype) for g, t in zip(cot, diff)])
+    watched2 = [(f"grad_in[{i}]", t) for i, t in enumerate(inputs2)
+                if isinstance(t, torch.Tensor) and t.requires_grad]
+    watched2 += [(f"grad_param[{i}]", t) for i, t in enumerate(case.params_fast)]
+    for (name, t) in watched2:
+        same(name, first_grad[name], _grad_or_zeros(t))
+
+
 def check(p: Pair, device, fast_override=None) -> dict:
     case = p.build(device)
     fast_fn = case.fast
@@ -271,6 +322,12 @@ def check(p: Pair, device, fast_override=None) -> dict:
             if r.grad is None and f.grad is None:
                 continue
             _compare(p, name, _grad_or_zeros(f), _grad_or_zeros(r), p.gtol, errors)
+
+    # Task 3: the third check of the plan (parity above, determinism here, the 1.01 drill via fast_override).
+    # Skipped when fast_override is set: the drill wants check() to fail on the parity step, and a wrapped
+    # function would not be a fair test of the real fast code's determinism.
+    if p.deterministic and fast_override is None:
+        _check_determinism(p, case, fast_fn, fast_inputs, fast_tensors, device)
 
     if fast_override is None:
         outs = [v for k, v in errors.items() if k.startswith("out")]

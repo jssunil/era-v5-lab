@@ -26,6 +26,8 @@ Everything is driven by config: a new model is a new YAML file in `configs/`, no
 `configs/base.yaml` on its own is the plain NanoGPT comparison model (table embedding, dense MLP, plain stack, AdamW).
 `configs/tiny_cpu.yaml` is the lab model shrunk for a laptop.
 
+`optim.name=polar_muon_adamw` selects an additional single-process combined optimizer using Polar Express Muon + AdamW updates (including row equilibration, Muon+ norm correction, variance reduction, and cautious Muon decay). It is a separate comparison path; it does not replace the current `muon` implementation. This first integration uses ordinary PyTorch ops; fused kernels, distributed collectives, and sharded optimizer state are not integrated.
+
 ## Folder layout
 
 ```
@@ -47,6 +49,8 @@ docs/          PLAN.md (interfaces, what is done and left), PARTS.md (every part
   `framework.py` with the 1.01 drill, and the attention test pairs.
 - **Left for Gate 1:** the other three test pairs (KE, MoE, reversible), the report with the 5% two-run comparison (`bench --against` is a console version),
   `docs/METRICS.md`, then two baseline runs and `results/baseline_v0.md`, `results/slowest5_v0.md`.
+
+**Distributed optimizer follow-up:** the current Muon/AdamW implementation is local-process only. A DDP integration is implementable follow-up work: make parameter selection robust to the DDP `module.` prefix (or build from the unwrapped module), handle MoE experts unused on a rank, and add a multi-process correctness/smoke test. The current optimizer should not be treated as tested for DDP or ZeRO-style sharding.
 
 The full table is in [`docs/PLAN.md`](docs/PLAN.md) section 3. Every part we time is in [`docs/PARTS.md`](docs/PARTS.md).
 
@@ -114,6 +118,13 @@ the run's `--steps` plus timing warmup steps.
 
 ```bash
 python -m perfkit.smoke --steps 20 --warmup 5 optim.schedule=cosine optim.warmup_steps=3
+```
+
+Compare the Polar Express MuonAdamW update with the current hybrid optimizer using the same model and data:
+
+```bash
+python -m perfkit.smoke --steps 20 --warmup 5 optim.name=muon
+python -m perfkit.smoke --steps 20 --warmup 5 optim.name=polar_muon_adamw
 ```
 
 No timing results are published yet for the Brahmic vocabulary.

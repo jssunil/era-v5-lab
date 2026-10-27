@@ -34,7 +34,7 @@ model:                  # fields of models.config.ModelConfig, nothing else
   ce_chunks: 8
 
 optim:
-  name: adamw           # adamw | muon (Muon on every 2D weight, AdamW on the rest)
+  name: adamw           # adamw | muon | polar_muon_adamw (single-process combined Polar Express Muon + AdamW)
   lr: 0.0006
   muon_lr: 0.02
   weight_decay: 0.0
