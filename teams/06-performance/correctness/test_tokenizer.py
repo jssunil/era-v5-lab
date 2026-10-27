@@ -10,8 +10,10 @@ from dataio.loader import Loader, open_shard
 from dataio.prepare_fineweb import write_shard
 from dataio.tokenizer import BrahmicTokenizer, REVISION, SHA256, VOCAB_SIZE
 
+fixture = pytest.fixture
 
-@pytest.fixture(scope="module")
+
+@fixture(scope="module")
 def tokenizer():
     return BrahmicTokenizer(os.environ.get("BRAHMIC_TOKENIZER_PATH"))
 

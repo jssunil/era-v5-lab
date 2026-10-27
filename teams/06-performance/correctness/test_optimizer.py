@@ -7,8 +7,11 @@ from models.config import ModelConfig
 from models.gpt import GPT
 from models.optim import Muon, MuonAdamW, Optimizers, build_optimizer
 
+parametrize = pytest.mark.parametrize
+skipif = pytest.mark.skipif
 
-@pytest.mark.parametrize("embedding", ["table", "ke1"])
+
+@parametrize("embedding", ["table", "ke1"])
 def test_optimizer_ownership_and_norm_gains(embedding):
     # Small vocabulary here is a unit fixture, never a performance configuration.
     cfg = ModelConfig(vocab_size=16, block_size=4, n_layer=1, n_head=2, n_embd=8,
@@ -111,7 +114,7 @@ def _reference_muon_step(param, grad, momentum_buffer, lr, momentum, weight_deca
     return expected, momentum_buffer
 
 
-@pytest.mark.parametrize("shape", [(2, 3), (3, 2)])
+@parametrize("shape", [(2, 3), (3, 2)])
 def test_muon_five_step_update_matches_independent_reference(shape):
     lr, momentum, weight_decay = 0.03, 0.8, 0.04
     initial = torch.arange(1, shape[0] * shape[1] + 1, dtype=torch.float32).reshape(shape) / 3
@@ -262,7 +265,7 @@ def test_polar_muon_adamw_is_one_optimizer_and_matches_reference():
         torch.testing.assert_close(param, refs[id(param)], rtol=2e-5, atol=2e-6)
 
 
-@pytest.mark.parametrize("shape", [(2, 3), (3, 2)])
+@parametrize("shape", [(2, 3), (3, 2)])
 def test_polar_muon_rectangular_scaling_matches_reference(shape):
     p = torch.nn.Parameter(torch.arange(1, shape[0] * shape[1] + 1, dtype=torch.float32).reshape(shape) / 5)
     grad = torch.linspace(-0.3, 0.4, p.numel()).reshape(shape)
@@ -305,7 +308,7 @@ def test_hybrid_optimizer_state_dict_resumes_identically():
         torch.testing.assert_close(resumed, live, rtol=0, atol=1e-7)
 
 
-@pytest.mark.skipif(not torch.cuda.is_available(), reason="GradScaler overflow behavior requires CUDA")
+@skipif(not torch.cuda.is_available(), reason="GradScaler overflow behavior requires CUDA")
 def test_grad_scaler_skips_both_hybrid_optimizers_on_overflow():
     muon_param = torch.nn.Parameter(torch.tensor([[1.0, 2.0], [3.0, 4.0]], device="cuda"))
     adamw_param = torch.nn.Parameter(torch.tensor([2.0, -1.0], device="cuda"))
