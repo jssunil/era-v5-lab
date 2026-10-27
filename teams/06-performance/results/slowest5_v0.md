@@ -12,7 +12,7 @@ launches. Part 4 is the exception: the GPU is busy all the time, moving memory.
 
 | # | Part | ms | % of step | CPU time in trace | GPU kernel time in trace | Trace |
 |---|---|---:|---:|---:|---:|---|
-| 1 | `opt:opt.muon.ns` | 145.9 | 28.8% | 67.1 ms (first 47 of 189 matrices) | 8.1 ms | `runs/baseline_v0_parts/1_opt_opt.muon.ns.json` |
+| 1 | `opt:opt.muon.ns` | 145.9 | 28.8% | 69.9 ms (48 of 189 matrices) | 8.3 ms | `runs/baseline_v0_parts/1_opt_opt.muon.ns.json` |
 | 2 | `bwd:block*.grad` | 90.4 | 17.8% | 18.1 ms (layer 4) | 4.1 ms | `runs/baseline_v0_parts/2_bwd_block4.grad.json` |
 | 3 | `fwd:block*.moe.dispatch` | 50.6 | 10.0% | 8.6 ms (layer 4) | 1.3 ms | `runs/baseline_v0_parts/3_fwd_block4.moe.dispatch.json` |
 | 4 | `bwd:head+loss` | 48.2 | 9.5% | 1.4 ms | 48.1 ms | `runs/baseline_v0_parts/4_bwd_head+loss.json` |
@@ -23,9 +23,10 @@ Together: 381 ms, 75% of the step.
 ## 1. Muon Newton-Schulz: `opt:opt.muon.ns`, 146 ms (29%)
 
 - **What the trace shows:** Muon orthogonalizes each of the 189 block weight matrices separately: 5 iterations
-  of 3 small matmuls plus element-wise ops, about 43 kernel launches per matrix. The trace keeps the first 47
-  matrices (the file is capped at 4.5 MB), about the first half of the part. For those 47 the CPU takes 67 ms and
-  the GPU 8 ms; the GPU waits between kernels.
+  of 3 small matmuls plus element-wise ops, about 43 kernel launches per matrix. The trace keeps every 4th
+  matrix, 48 of 189 from the first to the last (the file is capped at 4.5 MB). For those 48 the CPU takes 70 ms
+  and the GPU 8 ms, about 1.5 ms against 0.17 ms per matrix; the GPU waits between kernels. This trace is from
+  a later run at `b278601`, which changed only how the trace is cut, not the model or the optimizer.
 - **Cause:** launch-bound. The matrices are small (8x256 up to 1024x256), and each runs alone.
 - **Supporting run:** the same model with AdamW instead of Muon runs 157 ms faster per step (what-if table below).
 - **Week-2 idea:** batch matrices of the same shape and run Newton-Schulz on the stack with `torch.bmm`. There
@@ -63,8 +64,8 @@ Together: 381 ms, 75% of the step.
   25 ms, plus 15 ms of element-wise kernels. The fp32 logits are 16,384 x 131,072 = 8.6 GB. The softmax backward
   reads two such tensors and writes one, 25.8 GB in 25 ms: 1.0 TB/s, about 66% of the A100's 1.55 TB/s.
 - **Cause:** memory-bound. The full fp32 logits are built, stored and read back. Together with the forward
-  (42 ms) the head and loss take 90 ms (18%) and most of the 25 GB peak memory.
-- **Supporting run:** `model.ce_impl=chunked` (the head in 8 pieces) cuts peak memory from 25.1 to 4.2 GB but
+  (42 ms) the head and loss take 90 ms (18%) and most of the 25.1 GiB peak memory.
+- **Supporting run:** `model.ce_impl=chunked` (the head in 8 pieces) cuts peak memory from 25.1 to 4.2 GiB but
   costs 10% step time, because it computes the head twice.
 - **Week-2 idea:** fused linear cross-entropy, which never stores the logits: Liger Kernel's
   `FusedLinearCrossEntropy` or Apple's Cut Cross-Entropy (CCE). It becomes `model.ce_impl: fused`, tested by a
@@ -89,11 +90,11 @@ candidate, which bounds what fixing it can give.
 
 | Run | Step (ms) | Change | Peak memory | Shows |
 |---|---:|---:|---:|---|
-| lab_small | 514 | | 25.1 GB | |
-| AdamW instead of Muon | 357 | -157 ms | 25.3 GB | the most that part 1 can give |
-| Plain residual stack instead of reversible | 389 | -125 ms | 28.2 GB | the reversible stack saves only 3 GB here, because the logits dominate memory (a question for the architecture team) |
-| Chunked cross-entropy | 565 | +52 ms | 4.2 GB | part 4: memory can drop 21 GB, but not with the chunked version |
-| Plain NanoGPT (`configs/base.yaml`) | 112 | | 25.8 GB | GPU 100% busy, MFU 12%: the floor of this setup |
+| lab_small | 514 | | 25.1 GiB | |
+| AdamW instead of Muon | 357 | -157 ms | 25.3 GiB | the most that part 1 can give |
+| Plain residual stack instead of reversible | 389 | -125 ms | 28.2 GiB | the reversible stack saves only 3 GiB here, because the logits dominate memory (a question for the architecture team) |
+| Chunked cross-entropy | 565 | +52 ms | 4.2 GiB | part 4: memory can drop 21 GiB, but not with the chunked version |
+| Plain NanoGPT (`configs/base.yaml`) | 112 | | 25.8 GiB | nvidia-smi utilization 100%, MFU 12%: the floor of this setup |
 
 Already done in v0: the MoE token counts no longer sync with the host (`models/moe.py`): 649 to 433 syncs per
-step, 514 to 497-507 ms across runs on this GPU.
+step, 514 to 497-517 ms across the seven runs since on this GPU.

@@ -4,10 +4,10 @@
 
 | | |
 |---|---|
-| GPU | NVIDIA A100-SXM4-40GB (compute capability 8.0, 39.5 GB), Colab |
+| GPU | NVIDIA A100-SXM4-40GB (compute capability 8.0, 39.5 GiB), Colab |
 | Commit | `f1f4986aa0e4f74c64c86ce108c65c25678174eb`, clean tree (`dirty: false`) |
 | Software | torch 2.11.0+cu130, CUDA 13.0, driver 580.82.07, Python 3.13 |
-| Config | `configs/lab_small.yaml`, no overrides |
+| Config | `configs/lab_small.yaml`, no model overrides (`--level 3` sets `bench.level=3`) |
 | Model | KE v1 embedding, GQA 8/2 heads, MoE 1 shared + top-2 of 8, reversible midpoint stack, 9 layers, width 256, vocabulary 131,072 (BrahmicTokenizer-131K) |
 | Run | bf16 autocast, B=32, T=512 (16,384 tokens per step), FineWeb sample-10BT, Muon + AdamW, constant LR |
 | Command | `python -m perfkit.bench --config configs/lab_small.yaml --level 3 --repeat 2 --tag baseline_v0` |
@@ -22,7 +22,7 @@
 | p10 .. p90 (ms) | 499.6 .. 520.1 | 507.2 .. 529.0 |
 | Tokens per second | 32,340 | 31,694 |
 | MFU / HFU (bf16 dense peak 312 TFLOPS) | 3.3% / 4.2% | 3.3% / 4.2% |
-| Peak memory allocated / reserved (GB) | 25.1 / 29.4 | 25.1 / 29.4 |
+| Peak memory allocated / reserved (GiB) | 25.1 / 29.4 | 25.1 / 29.4 |
 | GPU busy in the trace | 24.9% | 24.6% |
 | Kernels per step / host syncs per step | 18,428 / 433 | 18,431 / 433 |
 | Recorder overhead (layer mode) | 0.06% | 0.51% |
@@ -75,20 +75,20 @@ Diff = slower / faster - 1. Level-3 parts (inside a block) are timed and listed 
 | `opt:opt.adamw` | 2 | 1.658 | 1.640 | 1.09% | ok |
 | `checkpoint save` | - | 3161.193 | 3156.190 | 0.16% | ok |
 
-**Watch:** the per-block parts have a p10..p90 spread of 8 to 11% within a run (run 2 flags six of them above
-10%), and run 2 is 2 to 4% slower on the CPU-bound parts (the blocks, Muon). That is inside 5%, but with less
+**Watch:** the per-block parts have a p10..p90 spread of 6 to 11% within a run (run 2 flags six of them above
+10%), and run 2 is 1 to 4% slower on the CPU-bound parts (the blocks, Muon). That is inside 5%, but with less
 margin than the GPU-bound parts, which agree within 0.2% (`fwd:embed`, `head+loss`).
 
 ## Also measured
 
 | | Run 1 | Run 2 |
 |---|---:|---:|
-| Checkpoint save (model + optimizer, 747 MB), median of 10 | 3161 ms | 3156 ms |
+| Checkpoint save (model + optimizer, 747 MiB), median of 10 | 3161 ms | 3156 ms |
 | of which copy to CPU / write and fsync | 65 / 3096 ms | 65 / 3091 ms |
 | GPU during the clean steps (nvidia-smi, 77 and 78 samples): utilization, SM clock, power, temperature | 59%, 1410 MHz, 127 W, 39 C | 39%, 1410 MHz, 122 W, 39 C |
 | Clock slowdowns (power or thermal) | none | none |
 | Reversible reconstruction error (bf16) | 2.4e-4 | 2.4e-4 |
-| MoE all-to-all | not timed: one GPU. Payload 32 MB per call, 72 calls per step (needs `torchrun` on 2 GPUs) | |
+| MoE all-to-all | not timed: one GPU. Payload 32 MiB per call, 72 calls per step (needs `torchrun` on 2 GPUs) | |
 
 nvidia-smi's utilization counts the time at least one kernel runs, sampled once a second, so it moves between
 runs (59% vs 39%) while the step time does not. The trace's GPU busy figure (25%) is the measured one.
@@ -96,7 +96,7 @@ runs (59% vs 39%) while the step time does not. The trace's GPU busy figure (25%
 ## What makes the runs repeatable
 
 - **Each run gets its own Python process.** A second run in the same process as a first one that used the
-  profiler was 26% slower on every CPU-bound part, and the same on the GPU-bound ones (the head, the embedding).
+  profiler was 26% slower on every CPU-bound part, while the GPU-bound ones (the head, the embedding) did not change.
   The step is CPU-bound (25% GPU busy), so anything that slows the CPU shows up in the timings.
 - **The same GPU, clocks steady.** The SM clock stayed at 1410 MHz with no power or thermal slowdowns in either
   run, so GPU clocks do not explain the remaining 0 to 4%.
