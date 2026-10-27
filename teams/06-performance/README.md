@@ -26,7 +26,7 @@ Everything is driven by config: a new model is a new YAML file in `configs/`, no
 `configs/base.yaml` on its own is the plain NanoGPT comparison model (table embedding, dense MLP, plain stack, AdamW).
 `configs/tiny_cpu.yaml` is the lab model shrunk for a laptop.
 
-`optim.name=nanochat` selects an additional single-process combined optimizer based on nanochat's Polar Express Muon + AdamW update (including row equilibration, Muon+ norm correction, variance reduction, and cautious Muon decay). It is a separate comparison path; it does not replace the current `muon` implementation. This first integration uses ordinary PyTorch ops; nanochat's compiled fused kernels, distributed collectives, and ZeRO-style state sharding are not integrated.
+`optim.name=polar_muon_adamw` selects an additional single-process combined optimizer using Polar Express Muon + AdamW updates (including row equilibration, Muon+ norm correction, variance reduction, and cautious Muon decay). It is a separate comparison path; it does not replace the current `muon` implementation. This first integration uses ordinary PyTorch ops; fused kernels, distributed collectives, and sharded optimizer state are not integrated.
 
 ## Folder layout
 
@@ -120,11 +120,11 @@ the run's `--steps` plus timing warmup steps.
 python -m perfkit.smoke --steps 20 --warmup 5 optim.schedule=cosine optim.warmup_steps=3
 ```
 
-Compare the nanochat-style combined update with the current hybrid optimizer using the same model and data:
+Compare the Polar Express MuonAdamW update with the current hybrid optimizer using the same model and data:
 
 ```bash
 python -m perfkit.smoke --steps 20 --warmup 5 optim.name=muon
-python -m perfkit.smoke --steps 20 --warmup 5 optim.name=nanochat
+python -m perfkit.smoke --steps 20 --warmup 5 optim.name=polar_muon_adamw
 ```
 
 No timing results are published yet for the Brahmic vocabulary.

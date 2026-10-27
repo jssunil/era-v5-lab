@@ -1,7 +1,7 @@
 """Optimizers: AdamW, or Muon on every 2D weight + AdamW on the rest.  [implemented: MVP]
 
   * build_optimizer(model, ocfg) -> object with zero_grad(), step(scaler=None), unscale(scaler), flops().
-    ocfg = cfg["optim"]: name adamw | muon | nanochat, lr, muon_lr, weight_decay.
+    ocfg = cfg["optim"]: name adamw | muon | polar_muon_adamw, lr, muon_lr, weight_decay.
   * adamw: torch.optim.AdamW (fused=True on CUDA).
   * muon: Muon (Keller Jordan): momentum 0.95 nesterov, update = NS5(momentum grad) * max(1, rows/cols)**0.5,
     Newton-Schulz coefficients (3.4445, -4.7750, 2.0315), 5 steps, bf16 (fp32 on GPUs without bf16: T4/P100/V100).
@@ -9,7 +9,7 @@
     (token table / KE projection / position table), output head, norm gains and biases. Decoupled
     weight decay applies to AdamW matrices, not 1D biases or norm gains.
     A parameter with grad=None is skipped, matching AdamW's unused-expert behavior.
-  * nanochat: one torch optimizer combines AdamW with Polar Express Muon, row equilibration,
+  * polar_muon_adamw: one torch optimizer combines AdamW with Polar Express Muon, row equilibration,
     norm correction, factored variance reduction and cautious weight decay (single-process implementation).
   * Regions (level 2): "opt.muon", "opt.adamw"; (level 3): "opt.zero_grad".
   * flops(): Newton-Schulz FLOPs per step = sum over matrices of 5 * (4 m^2 n + 2 m^3), m <= n (for HFU).
@@ -26,7 +26,7 @@ from perfkit.regions import region
 
 NS_COEFFS = (3.4445, -4.7750, 2.0315)
 
-# Polar Express coefficients used by nanochat's Muon update (five iterations).
+# Polar Express Muon coefficients (five iterations).
 POLAR_EXPRESS_COEFFS = (
     (8.156554524902461, -22.48329292557795, 15.878769915207462),
     (4.042929935166739, -2.808917465908714, 0.5000178451051316),
@@ -84,9 +84,10 @@ class Muon(torch.optim.Optimizer):
 
 
 class MuonAdamW(torch.optim.Optimizer):
-    """Single-process combined optimizer using nanochat's AdamW + enhanced Muon updates.
+    """Single-process combined optimizer using Polar Express Muon + AdamW updates.
 
-    Adapted from https://github.com/karpathy/nanochat/blob/master/nanochat/optim.py
+    Adapted from Andrej Karpathy's reference implementation:
+    https://github.com/karpathy/nanochat/blob/master/nanochat/optim.py
     (MIT, Copyright 2025 Andrej Karpathy).
     This port keeps the Polar Express, row equilibration, Muon+ norm correction, factored
     variance reduction, and cautious decay update. Its collectives/sharded-state code is not
@@ -179,7 +180,7 @@ class MuonAdamW(torch.optim.Optimizer):
                     elif kind == "adamw":
                         self._adamw_step(p, p.grad, self.state[p], group)
                     else:
-                        raise ValueError(f"unknown nanochat optimizer group kind {kind!r}")
+                        raise ValueError(f"unknown MuonAdamW optimizer group kind {kind!r}")
         return loss
 
 
@@ -281,7 +282,7 @@ def build_optimizer(model, ocfg: dict):
 
     if ocfg["name"] == "adamw":
         return Optimizers([("opt.adamw", adamw(named_params))])
-    if ocfg["name"] == "nanochat":
+    if ocfg["name"] == "polar_muon_adamw":
         muon_params = [p for n, p in named_params
                        if p.dim() == 2 and n.startswith("blocks.") and n.endswith(".weight")]
         muon_ids = {id(p) for p in muon_params}
@@ -303,7 +304,7 @@ def build_optimizer(model, ocfg: dict):
         if no_decay:
             groups.append({"params": no_decay, "kind": "adamw", "lr": ocfg["lr"],
                            "betas": (0.9, 0.95), "eps": 1e-8, "weight_decay": 0.0})
-        return Optimizers([("opt.nanochat", MuonAdamW(groups))])
+        return Optimizers([("opt.polar_muon_adamw", MuonAdamW(groups))])
     if ocfg["name"] == "muon":
         if "muon_params" in ocfg and ocfg["muon_params"] != "hidden":
             raise ValueError("Remove optim.muon_params: embeddings and head must use AdamW")
@@ -318,4 +319,4 @@ def build_optimizer(model, ocfg: dict):
         if rest:
             named.append(("opt.adamw", adamw(rest)))
         return Optimizers(named)
-    raise ValueError(f"optim.name={ocfg['name']!r}: adamw | muon")
+    raise ValueError(f"optim.name={ocfg['name']!r}: adamw | muon | polar_muon_adamw")

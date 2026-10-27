@@ -167,7 +167,7 @@ def test_pure_adamw_two_steps_match_independent_reference():
 
 
 def _reference_polar_muon_step(param, grad, momentum_buffer, second_buffer, lr, weight_decay):
-    """Small CPU reference for nanochat's enhanced Muon update; does not call production helpers."""
+    """Small CPU reference for Polar Express Muon; does not call production helpers."""
     momentum = 0.95
     if momentum_buffer is None:
         momentum_buffer = torch.zeros_like(grad)
@@ -208,7 +208,7 @@ def _reference_polar_muon_step(param, grad, momentum_buffer, second_buffer, lr, 
     return expected, momentum_buffer, second_buffer
 
 
-def test_nanochat_optimizer_is_one_optimizer_and_matches_reference():
+def test_polar_muon_adamw_is_one_optimizer_and_matches_reference():
     class TinyBlock(torch.nn.Module):
         def __init__(self):
             super().__init__()
@@ -224,11 +224,11 @@ def test_nanochat_optimizer_is_one_optimizer_and_matches_reference():
 
     model = TinyModel()
     lr, muon_lr, weight_decay = 0.01, 0.02, 0.03
-    opt = build_optimizer(model, dict(name="nanochat", lr=lr, muon_lr=muon_lr,
+    opt = build_optimizer(model, dict(name="polar_muon_adamw", lr=lr, muon_lr=muon_lr,
                                       weight_decay=weight_decay))
     assert len(opt.named) == 1
     name, combined = opt.named[0]
-    assert name == "opt.nanochat"
+    assert name == "opt.polar_muon_adamw"
     assert isinstance(combined, MuonAdamW)
     muon_group = next(group for group in combined.param_groups if group["kind"] == "muon")
     muon_ids = {id(p) for p in muon_group["params"]}
@@ -263,7 +263,7 @@ def test_nanochat_optimizer_is_one_optimizer_and_matches_reference():
 
 
 @pytest.mark.parametrize("shape", [(2, 3), (3, 2)])
-def test_nanochat_muon_rectangular_scaling_matches_reference(shape):
+def test_polar_muon_rectangular_scaling_matches_reference(shape):
     p = torch.nn.Parameter(torch.arange(1, shape[0] * shape[1] + 1, dtype=torch.float32).reshape(shape) / 5)
     grad = torch.linspace(-0.3, 0.4, p.numel()).reshape(shape)
     lr, weight_decay = 0.015, 0.02
