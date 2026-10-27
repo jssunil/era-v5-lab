@@ -47,6 +47,10 @@ def _blocks(ffn: str, n_layer: int, seed: int = 0) -> torch.nn.ModuleList:
                 p.copy_(torch.randn(p.shape, generator=g) * WEIGHT_STD)
             else:
                 p.zero_()
+        # LayerNorm weights are 1-D too: left at 0 every f is 0 and the stack returns x unchanged (out err 0)
+        for m in blocks.modules():
+            if isinstance(m, torch.nn.LayerNorm):
+                m.weight.fill_(1.0)
         # Clear MoE top-k margins if present.
         for blk in blocks:
             ffn_mod = blk.ffn
