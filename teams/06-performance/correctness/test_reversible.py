@@ -108,7 +108,9 @@ parametrize = pytest.mark.parametrize
 @parametrize("name", pairs_in(__name__))
 def test_pair(name, device):
     errors = check(PAIRS[name], device)
-    assert errors, f"{name}: check returned no errors, nothing was compared"
+    assert "out[0]" in errors, f"{name}: output was not compared"
+    assert "grad_in[0]" in errors, f"{name}: input gradient was not compared"
+    assert any(key.startswith("grad_param[") for key in errors), f"{name}: no parameter gradients were compared"
 
 
 @parametrize("ffn", ["mlp", "moe"])
@@ -133,24 +135,20 @@ def test_bf16_reconstruction_moe(n_layer, device):
 
 
 def test_bf16_grad_agrees_with_plain(device):
+    if device.type == "cuda" and not torch.cuda.is_bf16_supported():
+        pytest.skip("bf16 autocast backward requires CUDA bf16 support")
     blocks = _blocks("moe", N_LAYER_PAIR, seed=6).to(device)
     x0 = torch.randn(B, T, N_EMBD, device=device, generator=torch.Generator(device=device).manual_seed(7))
-    try:
-        with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
-            x_fast = x0.detach().clone().requires_grad_(True)
-            y_fast = ReversibleStack.apply(x_fast, blocks)
-            y_fast.float().sum().backward()
-            g_fast = x_fast.grad.detach().float()
+    with torch.autocast(device_type=device.type, dtype=torch.bfloat16):
+        x_fast = x0.detach().clone().requires_grad_(True)
+        y_fast = ReversibleStack.apply(x_fast, blocks)
+        y_fast.float().sum().backward()
+        g_fast = x_fast.grad.detach().float()
 
-            blocks_plain = copy.deepcopy(blocks)
-            x_ref = x0.detach().clone().requires_grad_(True)
-            y_ref = plain_forward(x_ref, blocks_plain)
-            y_ref.float().sum().backward()
-            g_ref = x_ref.grad.detach().float()
-    except RuntimeError as exc:
-        msg = str(exc)
-        if "bf16" in msg.lower() or "DNNL" in msg or "f16" in msg.lower():
-            pytest.skip(f"bf16 backward unsupported on this device: {exc}")
-        raise
+        blocks_plain = copy.deepcopy(blocks)
+        x_ref = x0.detach().clone().requires_grad_(True)
+        y_ref = plain_forward(x_ref, blocks_plain)
+        y_ref.float().sum().backward()
+        g_ref = x_ref.grad.detach().float()
     err = rel_err(g_fast, g_ref)
     assert err < 1e-3, f"bf16 grad rel_err={err:.3e}"
