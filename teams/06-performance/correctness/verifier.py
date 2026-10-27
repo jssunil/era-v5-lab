@@ -151,7 +151,21 @@ class CorrectnessVerifier:
 
         atol, rtol = self._tol(ref_c.dtype)
         m = _metrics(ref_c, fast_c)
-        ok = bool(torch.allclose(ref_c, fast_c, atol=atol, rtol=rtol))
+        # fp32 Gate path: relative-norm error (matches correctness.framework.rel_err),
+        # not torch.allclose defaults (which are too loose for a 1% mutation in bf16,
+        # and are the wrong metric for the lead contract on fp32).
+        if ref_c.dtype in (torch.float32, torch.float64):
+            from correctness.framework import rel_err
+
+            try:
+                err = rel_err(fast_c, ref_c)
+                ok = err <= max(atol, rtol)
+                m["rel_err"] = err
+            except AssertionError:
+                ok = False
+                m["rel_err"] = float("nan")
+        else:
+            ok = bool(torch.allclose(ref_c, fast_c, atol=atol, rtol=rtol))
         detail = {
             "tag": tag,
             "idx": idx,
