@@ -20,7 +20,7 @@ The reference is written from the definition in the models/ke1.py docstring and 
     embedding(t) = W @ kappa(t)
 
 Not covered here: the source tokenizer's byte table (all 131072 rows, special tokens, partial UTF-8) lives in
-test_tokenizer_optimizer.py. KE2 is not covered: the plan waits for G4's KE2 decode reference (DEP-G4, 28 Oct) and
+test_tokenizer.py. KE2 is not covered: the plan waits for G4's KE2 decode reference (DEP-G4, 28 Oct) and
 its function signature (open question Q02); when it arrives, add a pair next to these and swap the reference.
 """
 from __future__ import annotations
