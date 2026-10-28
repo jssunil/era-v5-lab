@@ -28,6 +28,13 @@ Everything is driven by config: a new model is a new YAML file in `configs/`, no
 
 `optim.name=polar_muon_adamw` selects an additional single-process combined optimizer using Polar Express Muon + AdamW updates (including row equilibration, Muon+ norm correction, variance reduction, and cautious Muon decay). It is a separate comparison path; it does not replace the current `muon` implementation. This first integration uses ordinary PyTorch ops; fused kernels, distributed collectives, and sharded optimizer state are not integrated.
 
+`optim.muon_impl=loop|batched` selects the per-matrix Muon reference or shape-batched Newton–Schulz path. The benchmark comparison permits this implementation switch while still requiring the same model, optimizer settings, device, dtype, and data. Compare both paths from one clean commit:
+
+```bash
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_loop optim.muon_impl=loop
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_batched --against results/runs/muon_loop.json optim.muon_impl=batched
+```
+
 ## Folder layout
 
 ```

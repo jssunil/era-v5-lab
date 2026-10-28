@@ -35,6 +35,14 @@ COMPARE_CONFIG = [
 ]
 
 
+def _compare_config_value(config: dict, section: str, key: str | None):
+    value = config.get(section, {}) if key is None else config.get(section, {}).get(key)
+    if section == "optim" and key is None and isinstance(value, dict):
+        # Permit a controlled implementation comparison for the same Muon update.
+        value = {k: v for k, v in value.items() if k != "muon_impl"}
+    return value
+
+
 def _f(x, digits=3):
     if x is None:
         return "-"
@@ -53,13 +61,6 @@ def _pct_delta(x, y) -> float | None:
     if min(x, y) > 0:
         return (max(x, y) / min(x, y) - 1) * 100
     return math.inf
-
-
-def _cfg_get(run: dict, section: str, key: str | None):
-    sec = run.get("config", {}).get(section, {})
-    if key is None:
-        return sec
-    return sec.get(key) if isinstance(sec, dict) else None
 
 
 def _batch_size(run: dict):
@@ -101,8 +102,8 @@ def _refuse(a: dict, b: dict) -> list[str]:
     if _seq_len(a) != _seq_len(b):
         problems.append(f"different seq_len: {_seq_len(a)} vs {_seq_len(b)}")
     for section, key in COMPARE_CONFIG:
-        va = _cfg_get(a, section, key)
-        vb = _cfg_get(b, section, key)
+        va = _compare_config_value(a.get("config", {}), section, key)
+        vb = _compare_config_value(b.get("config", {}), section, key)
         if va != vb:
             if key is None:
                 problems.append(f"different {section} config")

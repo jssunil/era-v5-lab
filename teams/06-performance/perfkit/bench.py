@@ -118,6 +118,15 @@ MODES = ("clean", "layer", "trace", "checkpoint", "comm")
 COMPARE_CONFIG = [("model", None), ("optim", None), ("run", "compile"), ("run", "grad_clip"), ("data", "source")]
 
 
+def _compare_config_value(config: dict, section: str, key: str | None):
+    value = config.get(section, {}) if key is None else config.get(section, {}).get(key)
+    if section == "optim" and key is None and isinstance(value, dict):
+        # muon_impl is an implementation switch: these two runs intentionally do different
+        # work only in how the same Muon update is executed, so allow a paired timing comparison.
+        value = {k: v for k, v in value.items() if k != "muon_impl"}
+    return value
+
+
 # ------------------------------------------------------------------------------ build
 
 @dataclass
@@ -641,8 +650,8 @@ def quick_compare(a: dict, b: dict, tol_pct: float, gate_level: int) -> tuple:
         if a["meta"].get(k) != b["meta"].get(k):
             problems.append(f"different {k}: {a['meta'].get(k)} vs {b['meta'].get(k)}")
     for section, key in COMPARE_CONFIG:                  # what changes the work a step does
-        va = a["config"].get(section, {}) if key is None else a["config"].get(section, {}).get(key)
-        vb = b["config"].get(section, {}) if key is None else b["config"].get(section, {}).get(key)
+        va = _compare_config_value(a["config"], section, key)
+        vb = _compare_config_value(b["config"], section, key)
         if va != vb:
             problems.append(f"different {section} config" if key is None else
                             f"different {section}.{key}: {va} vs {vb}")

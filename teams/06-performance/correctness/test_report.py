@@ -19,6 +19,14 @@ def test_same_clean_commit_passes():
     assert ok and problems == []
 
 
+def test_same_commit_muon_implementation_variants_can_be_compared():
+    a, b = _pair()
+    a["config"]["optim"].update(name="muon", muon_impl="loop")
+    b["config"]["optim"].update(name="muon", muon_impl="batched")
+    _, ok, problems = report.compare(a, b)
+    assert ok and problems == []
+
+
 def test_different_commit_is_refused():
     _, ok, problems = report.compare(*_pair(commit="1" * 40))
     assert not ok and any("different commit" in p for p in problems)

@@ -5,23 +5,27 @@ import torch
 
 from models.config import ModelConfig
 from models.gpt import GPT
-from models.optim import Muon, MuonAdamW, Optimizers, build_optimizer
+from models.optim import (Muon, MuonAdamW, Optimizers, build_optimizer,
+                          zeropower_via_newtonschulz5, zeropower_via_newtonschulz5_batched)
 
 parametrize = pytest.mark.parametrize
 skipif = pytest.mark.skipif
 
 
 @parametrize("embedding", ["table", "ke1"])
-def test_optimizer_ownership_and_norm_gains(embedding):
+@parametrize("muon_impl", ["loop", "batched"])
+def test_optimizer_ownership_and_norm_gains(embedding, muon_impl):
     # Small vocabulary here is a unit fixture, never a performance configuration.
     cfg = ModelConfig(vocab_size=16, block_size=4, n_layer=1, n_head=2, n_embd=8,
                       embedding=embedding, ffn="moe",
                       moe=dict(num_experts=2, top_k=1, num_shared=1))
     from models.ke1 import token_bytes_random
     model = GPT(cfg, token_bytes_random(16) if embedding == "ke1" else None)
-    opt = build_optimizer(model, dict(name="muon", lr=0.001, muon_lr=0.02, weight_decay=0.01))
+    opt = build_optimizer(model, dict(name="muon", muon_impl=muon_impl,
+                                      lr=0.001, muon_lr=0.02, weight_decay=0.01))
     optimizers = dict(opt.named)
     assert isinstance(optimizers["opt.muon"], Muon)
+    assert optimizers["opt.muon"].param_groups[0]["impl"] == muon_impl
     assert isinstance(optimizers["opt.adamw"], torch.optim.AdamW)
     assert optimizers["opt.adamw"].defaults["betas"] == (0.9, 0.95)
     assert optimizers["opt.adamw"].defaults["fused"] == next(model.parameters()).is_cuda
@@ -132,6 +136,48 @@ def test_muon_five_step_update_matches_independent_reference(shape):
         opt.step()
         torch.testing.assert_close(param, expected, rtol=0, atol=1e-6)
         torch.testing.assert_close(opt.state[param]["buf"], ref_buffer, rtol=0, atol=1e-7)
+
+
+@parametrize("shape", [(4, 3), (3, 4), (3, 3)])
+def test_batched_newton_schulz_matches_per_matrix_reference(shape):
+    batch = torch.linspace(-0.8, 1.1, 5 * shape[0] * shape[1]).reshape(5, *shape)
+    expected = torch.stack([zeropower_via_newtonschulz5(g, steps=5) for g in batch])
+    actual = zeropower_via_newtonschulz5_batched(batch, steps=5)
+    assert actual.shape == batch.shape
+    torch.testing.assert_close(actual, expected, rtol=2e-3, atol=2e-3)
+
+
+@parametrize("shape", [(4, 3), (3, 4)])
+def test_batched_muon_matches_loop_with_momentum_decay_and_missing_grad(shape):
+    torch.manual_seed(41)
+    initial = [torch.randn(shape), torch.randn(shape), torch.randn(shape)]
+    loop_params = [torch.nn.Parameter(p.clone()) for p in initial]
+    batch_params = [torch.nn.Parameter(p.clone()) for p in initial]
+    kwargs = dict(lr=0.025, momentum=0.8, ns_steps=5, weight_decay=0.03)
+    loop = Muon(loop_params, impl="loop", **kwargs)
+    batched = Muon(batch_params, impl="batched", **kwargs)
+
+    for step in range(3):
+        for i, (lp, bp) in enumerate(zip(loop_params, batch_params)):
+            if step == 1 and i == 1:
+                lp.grad = bp.grad = None
+                continue
+            grad = torch.linspace(-0.3, 0.4, lp.numel()).reshape_as(lp) * (step + i + 1)
+            lp.grad, bp.grad = grad.clone(), grad.clone()
+        loop.step()
+        batched.step()
+        for lp, bp in zip(loop_params, batch_params):
+            torch.testing.assert_close(bp, lp, rtol=2e-3, atol=2e-3)
+            if "buf" in loop.state.get(lp, {}):
+                torch.testing.assert_close(batched.state[bp]["buf"], loop.state[lp]["buf"], rtol=0, atol=0)
+
+
+def test_build_optimizer_selects_batched_muon_from_config():
+    cfg = ModelConfig(vocab_size=16, block_size=4, n_layer=1, n_head=2, n_embd=8)
+    model = GPT(cfg)
+    opt = build_optimizer(model, dict(name="muon", muon_impl="batched", lr=0.001,
+                                      muon_lr=0.02, weight_decay=0.0))
+    assert dict(opt.named)["opt.muon"].param_groups[0]["impl"] == "batched"
 
 
 def test_pure_adamw_two_steps_match_independent_reference():

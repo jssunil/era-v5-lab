@@ -226,6 +226,15 @@ def test_quick_compare_identical_runs_pass():
     assert all(r[4] == "ok" for r in rows)
 
 
+def test_quick_compare_allows_muon_implementation_variant():
+    a, b = _two_runs()
+    a["config"]["optim"]["muon_impl"] = "loop"
+    b["config"]["optim"]["muon_impl"] = "batched"
+    rows, ok, problems = bench.quick_compare(a, b, 5.0, 2)
+    assert ok and not problems
+    assert "step (clean)" in [row[0] for row in rows]
+
+
 def test_quick_compare_only_gates_levels_up_to_gate_level():
     a, b = _two_runs()
     level3 = [n for n, r in a["layer"]["regions"].items() if r["level"] == 3]
