@@ -639,3 +639,37 @@ def test_comm_preallocates_timing_events_and_exports_counter(monkeypatch):
     assert result["events_created_during_steps"] == 0
     assert result["measured"] is True and result["per_call_ms"]["n"] == 4
     assert result["per_step_ms"] == pytest.approx(4.0)
+
+
+# ------------------------------------------------------------------------------ G6 timer follow-up: layer and warning regressions
+
+def test_layer_timer_event_allocation_is_reported_in_json(first_run):
+    layer = first_run["run"]["layer"]
+    assert layer["events_created_during_steps"] == 0
+    assert layer["inner_pass"]["events_created_during_steps"] == 0
+
+
+def test_layer_event_allocation_warns_for_both_passes(tmp_path, monkeypatch):
+    real = bench.run_layer
+
+    def injected(s, n, level):
+        result = real(s, n, level)
+        result["events_created_during_steps"] = 2
+        result.setdefault("inner_pass", {})["events_created_during_steps"] = 4
+        return result
+
+    monkeypatch.setattr(bench, "run_layer", injected)
+    _run_main(tmp_path / "runs", "layer-events", "--modes", "clean,layer", "--level", "3")
+    run = json.loads((tmp_path / "runs" / "layer-events.json").read_text())
+    assert run["layer"]["events_created_during_steps"] == 2
+    assert run["layer"]["inner_pass"]["events_created_during_steps"] == 4
+    assert any("6 CUDA timing events" in w and "layer" in w for w in run["warnings"])
+
+
+def test_communication_warning_is_emitted_only_for_nonzero_counter():
+    warns = []
+    bench.warn_timing_allocations(warns, 0, "communication")
+    assert warns == []
+    bench.warn_timing_allocations(warns, 3, "communication")
+    assert len(warns) == 1
+    assert "3 CUDA timing events" in warns[0] and "communication" in warns[0]
