@@ -36,7 +36,7 @@ Timing markers (roofline and report read these names; keep them)
   mark(x, "head+loss", 1)                  on the stack output
   How bench turns these points into bwd:<name> segments (bwd:stack = the whole stack): perfkit/bench.py step 6.
 
-Extra (not yet): chunked cross-entropy (checkpointed), aux / z loss for non-reversible MoE.
+Follow-up: fused linear-cross-entropy kernel; aux / z loss for non-reversible MoE.
 """
 from __future__ import annotations
 
@@ -200,6 +200,7 @@ class GPT(nn.Module):
         return logits, loss
 
     def _chunked_ce(self, x, y):
+        """Compute mean CE in checkpointed position chunks to bound saved logits memory."""
         def piece(xc, yc):
             return F.cross_entropy(self.head(xc).float(), yc, reduction="sum")
         total = sum(torch.utils.checkpoint.checkpoint(piece, xc, yc, use_reentrant=False)
