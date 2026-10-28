@@ -291,6 +291,35 @@ def render(run: dict) -> str:
         "",
     ]
 
+    # Diagnostics are observational, not correctness-gate failures. Preserve
+    # exact warning strings from the benchmark rather than reconstructing them.
+    layer = run.get("layer") or {}
+    comm = (run.get("comm") or {}).get("moe_a2a") or {}
+    allocations = [
+        ("clean", clean.get("events_created_during_steps")),
+        ("layer", layer.get("events_created_during_steps")),
+        ("layer.inner_pass", (layer.get("inner_pass") or {}).get("events_created_during_steps")),
+        ("layer.recorder_pool", layer.get("events_created_while_measuring")),
+        ("layer.inner_pass.recorder_pool", (layer.get("inner_pass") or {}).get("events_created_while_measuring")),
+        ("communication.max_rank", comm.get("events_created_during_steps")),
+    ]
+    warnings = run.get("warnings") or []
+    lines += ["## Diagnostics", "", "### CUDA timing-event allocations", ""]
+    for stage, count in allocations:
+        if count is not None:
+            status = "WARN" if count > 0 else "OK"
+            field = ("events_created_while_measuring" if stage.endswith(".recorder_pool")
+                     else "events_created_during_steps")
+            lines.append(f"- [{status}] {stage}: {field}={count}")
+    if all(count is None for _, count in allocations):
+        lines.append("- NOT REPORTED (legacy run JSON)")
+    lines += ["", "### Benchmark warnings", ""]
+    if warnings:
+        lines.extend(f"- [warn] {message}" for message in warnings)
+    else:
+        lines.append("- None recorded")
+    lines += [""]
+
     regions = _regions(run)
     if regions:
         lines += [

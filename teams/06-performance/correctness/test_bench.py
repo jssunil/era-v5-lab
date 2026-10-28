@@ -592,3 +592,128 @@ def test_rule_checks_flag_an_unknown_dirty_state():
         r["spread_pct"] = 1.0
     out = "\n".join(bench.rule_checks(run, ["clean", "layer", "checkpoint", "comm"], _cfg()))
     assert "could not tell whether the code is committed" in out
+
+
+# ------------------------------------------------------------------------------ timer follow-up regressions
+
+def test_clean_json_reports_event_allocation_count(tmp_path):
+    # CPU path has no CUDA events, but must still export an explicit zero.
+    _run_main(tmp_path / "runs", "counter", "--modes", "clean")
+    run = json.loads((tmp_path / "runs" / "counter.json").read_text())
+    assert run["clean"]["events_created_during_steps"] == 0
+    assert validate_run(run) == []
+
+
+def test_clean_warns_if_timer_allocated_events_during_steps(tmp_path, monkeypatch):
+    # Simulate a CUDA event-pool exhaustion without requiring CUDA hardware.
+    real = bench.run_clean
+
+    def exhausted(s, n):
+        clean, loss, mem = real(s, n)
+        clean["events_created_during_steps"] = 2
+        return clean, loss, mem
+
+    monkeypatch.setattr(bench, "run_clean", exhausted)
+    _run_main(tmp_path / "runs", "exhausted", "--modes", "clean")
+    run = json.loads((tmp_path / "runs" / "exhausted.json").read_text())
+    assert run["clean"]["events_created_during_steps"] == 2
+    assert any("2 CUDA timing events" in w and "clean" in w for w in run["warnings"])
+
+
+def test_comm_preallocates_timing_events_and_exports_counter(monkeypatch):
+    import torch.distributed as dist
+
+    seen = {}
+
+    class FakeTimer:
+        def __init__(self, device, expected_steps=0):
+            seen["expected_steps"] = expected_steps
+            self.events_created_during_steps = 0
+            self.n = 0
+
+        def start(self):
+            pass
+
+        def stop(self):
+            self.n += 1
+
+        def times_ms(self):
+            return [2.0] * self.n
+
+    monkeypatch.setattr(bench.T, "StepTimer", FakeTimer)
+    monkeypatch.setattr(bench.T, "sync", lambda device: None)
+    monkeypatch.setattr(dist, "get_world_size", lambda: 2)
+    monkeypatch.setattr(dist, "get_backend", lambda: "gloo")
+    monkeypatch.setattr(dist, "barrier", lambda: None)
+    monkeypatch.setattr(dist, "all_to_all_single", lambda out, inp: out.copy_(inp))
+    monkeypatch.setattr(dist, "all_reduce", lambda tensor, op=None: None)
+
+    plan = {"payload_dtype": "fp32", "bytes_per_call": 32, "calls_per_step": 2}
+    result = bench.run_comm(plan, torch.device("cpu"), reps=4)
+    assert seen["expected_steps"] == 4
+    assert result["events_created_during_steps"] == 0
+    assert result["measured"] is True and result["per_call_ms"]["n"] == 4
+    assert result["per_step_ms"] == pytest.approx(4.0)
+
+
+# ------------------------------------------------------------------------------ G6 timer follow-up: layer and warning regressions
+
+def test_layer_timer_event_allocation_is_reported_in_json(first_run):
+    layer = first_run["run"]["layer"]
+    assert layer["events_created_during_steps"] == 0
+    assert layer["inner_pass"]["events_created_during_steps"] == 0
+
+
+def test_layer_event_allocation_warns_for_both_passes(tmp_path, monkeypatch):
+    real = bench.run_layer
+
+    def injected(s, n, level):
+        result = real(s, n, level)
+        result["events_created_during_steps"] = 2
+        result.setdefault("inner_pass", {})["events_created_during_steps"] = 4
+        return result
+
+    monkeypatch.setattr(bench, "run_layer", injected)
+    _run_main(tmp_path / "runs", "layer-events", "--modes", "clean,layer", "--level", "3")
+    run = json.loads((tmp_path / "runs" / "layer-events.json").read_text())
+    assert run["layer"]["events_created_during_steps"] == 2
+    assert run["layer"]["inner_pass"]["events_created_during_steps"] == 4
+    assert any("6 CUDA timing events" in w and "layer" in w for w in run["warnings"])
+
+
+def test_communication_warning_is_emitted_only_for_nonzero_counter():
+    warns = []
+    bench.warn_timing_allocations(warns, 0, "communication")
+    assert warns == []
+    bench.warn_timing_allocations(warns, 3, "communication")
+    assert len(warns) == 1
+    assert "3 CUDA timing events" in warns[0] and "communication" in warns[0]
+
+
+# Sunil PR24 review regression: inner recorder-pool reporting
+def test_inner_pool_warning_and_json(tmp_path, monkeypatch):
+    real = bench.run_layer
+    def injected(s, n, level):
+        result = real(s, n, level)
+        result["inner_pass"]["events_created_while_measuring"] = 57
+        return result
+    monkeypatch.setattr(bench, "run_layer", injected)
+    _run_main(tmp_path / "runs", "inner-pool", "--modes", "clean,layer", "--level", "3")
+    run = json.loads((tmp_path / "runs" / "inner-pool.json").read_text())
+    assert run["layer"]["inner_pass"]["events_created_while_measuring"] == 57
+    assert any("57 recorder-pool CUDA events" in w and "layer.inner_pass" in w for w in run["warnings"])
+
+
+def test_run_layer_copies_inner_pool_count(monkeypatch):
+    real = bench.layer_pass
+    calls = {"n": 0}
+    def injected(s, n, level, warm=2):
+        result = real(s, n, level, warm)
+        calls["n"] += 1
+        if calls["n"] == 2:
+            result["events_created_while_measuring"] = 57
+        return result
+    monkeypatch.setattr(bench, "layer_pass", injected)
+    s = bench.build(tiny_cfg(), torch.device("cpu"))
+    result = bench.run_layer(s, 1, 3)
+    assert result["inner_pass"]["events_created_while_measuring"] == 57

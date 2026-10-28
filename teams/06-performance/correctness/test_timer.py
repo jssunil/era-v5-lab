@@ -295,3 +295,73 @@ def test_cuda_event_preallocation_and_exhaustion(monkeypatch):
     t.start()
     t.stop()
     assert FakeEvent.created == 6
+
+
+# ------------------------------------------------------------------------------ reset follow-up regressions
+
+def test_step_timer_reset_rejects_open_step_on_cpu():
+    t = StepTimer(CPU, expected_steps=1)
+    t.start()
+    with pytest.raises(RuntimeError, match="open step"):
+        t.reset()
+    t.stop()
+    t.reset()
+    assert len(t) == 0
+
+
+def test_cuda_reset_synchronizes_before_event_reuse(monkeypatch):
+    # Fake CUDA events exercise synchronization and reuse on a CPU-only Mac.
+    made = []
+
+    class FakeEvent:
+        def __init__(self, enable_timing=False):
+            assert enable_timing
+            made.append(self)
+            self.synced = False
+
+        def record(self):
+            pass
+
+        def synchronize(self):
+            self.synced = True
+
+        def query(self):
+            return self.synced
+
+        def elapsed_time(self, other):
+            assert other.synced, "event timing must be synchronized before reuse"
+            return 1.0
+
+    monkeypatch.setattr(torch.cuda, "Event", FakeEvent)
+    t = StepTimer(torch.device("cuda"), expected_steps=1)
+    assert len(made) == 2
+    t.start()
+    t.stop()
+    t.reset()
+    assert len(t) == 0 and any(ev.synced for ev in made)
+    t.start()
+    t.stop()
+    assert len(made) == 2
+    assert t.events_created_during_steps == 0
+
+
+# Sunil PR24 review regression: cumulative fallback allocation count
+def test_cuda_counter_remains_cumulative_across_reset(monkeypatch):
+    class FakeEvent:
+        def __init__(self, enable_timing=False):
+            assert enable_timing
+        def record(self): pass
+        def synchronize(self): pass
+        def query(self): return True
+        def elapsed_time(self, other): return 1.0
+    monkeypatch.setattr(torch.cuda, "Event", FakeEvent)
+    timer = StepTimer(torch.device("cuda"), expected_steps=1)
+    for _ in range(2):
+        timer.start()
+        timer.stop()
+    assert timer.events_created_during_steps == 2
+    timer.reset()
+    assert timer.events_created_during_steps == 2
+    timer.start()
+    timer.stop()
+    assert timer.events_created_during_steps == 2

@@ -60,3 +60,41 @@ def test_dirty_or_unknown_tree_is_refused():
     for dirty in (True, None):
         _, ok, problems = report.compare(*_pair(dirty=dirty))
         assert not ok and any(f"dirty={dirty}" in p for p in problems)
+
+
+# ------------------------------------------------------------------------------ exact timing diagnostics in Markdown
+
+def test_render_shows_per_stage_cuda_allocation_diagnostics():
+    run = example_run()
+    run["clean"]["events_created_during_steps"] = 0
+    run["layer"] = {"events_created_during_steps": 2,
+                    "inner_pass": {"events_created_during_steps": 4}}
+    run["comm"] = {"moe_a2a": {"events_created_during_steps": 3}}
+    run["warnings"] = ["9 CUDA timing events were created during measured steps"]
+    md = report.render(run)
+    assert "[OK] clean: events_created_during_steps=0" in md
+    assert "[WARN] layer: events_created_during_steps=2" in md
+    assert "[WARN] layer.inner_pass: events_created_during_steps=4" in md
+    assert "[WARN] communication.max_rank: events_created_during_steps=3" in md
+    assert "[warn] 9 CUDA timing events were created during measured steps" in md
+
+
+def test_render_preserves_exact_warning_text_and_no_false_ke_claim():
+    run = example_run()
+    run["warnings"] = ["recorder overhead 3.2% > 2.0%: layer numbers are flagged"]
+    md = report.render(run)
+    assert "[warn] recorder overhead 3.2% > 2.0%: layer numbers are flagged" in md
+    assert md.count("[warn] recorder overhead 3.2%") == 1
+
+
+# Sunil PR24 review regression: distinct pool-counter diagnostics
+def test_render_flags_inner_pool_allocation_when_timer_count_is_zero():
+    run = example_run()
+    run["layer"] = {"events_created_during_steps": 0,
+                    "inner_pass": {"events_created_during_steps": 0,
+                                   "events_created_while_measuring": 57}}
+    run["warnings"] = ["57 recorder-pool CUDA events were created during layer.inner_pass measured steps"]
+    md = report.render(run)
+    assert "[OK] layer: events_created_during_steps=0" in md
+    assert "[WARN] layer.inner_pass.recorder_pool: events_created_while_measuring=57" in md
+    assert "[warn] 57 recorder-pool CUDA events" in md

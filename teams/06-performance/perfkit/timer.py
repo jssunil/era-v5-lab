@@ -111,6 +111,7 @@ class StepTimer:
         self._open = None
         # Preallocate both timestamps for every step, outside the measured loop.
         # Dynamic creation remains a safe fallback if a caller records more steps.
+        # CUDA runtime handles may be initialized lazily on first record().
         self._unused = ([torch.cuda.Event(enable_timing=True)
                          for _ in range(2 * expected_steps)]
                         if self.kind == "event" else [])
@@ -162,6 +163,14 @@ class StepTimer:
         return out
 
     def reset(self):
+        """Clear recorded steps and recycle completed CUDA events.
+
+        Raises RuntimeError if a step is open. On CUDA, times_ms()
+        synchronizes completed measurements before events are reused.
+        events_created_during_steps counts Python CUDA Event objects allocated
+        by the fallback path and stays cumulative across reset() calls.
+        It does not track underlying CUDA runtime event-handle creation.
+        """
         if self._open is not None:
             raise RuntimeError("StepTimer.reset() during an open step")
         if self.kind == "event" and self._pairs:

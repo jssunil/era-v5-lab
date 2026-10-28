@@ -295,7 +295,8 @@ def run_clean(s: Setup, n: int):
         data.append(d)
     times = st.times_ms()
     clean = {"step_ms": T.stats(times), "data_ms": T.stats(data),
-             "raw_step_ms": [round(t, 4) for t in times]}
+             "raw_step_ms": [round(t, 4) for t in times],
+             "events_created_during_steps": st.events_created_during_steps}
     return clean, loss, M.memory(s.device)
 
 
@@ -338,6 +339,8 @@ def layer_pass(s: Setup, n: int, max_level: int, warm: int = 2) -> dict:
     seq = [(o, next(on_ms) if o else next(off_ms)) for o in order]
     out = {
         "level": max_level,
+        "events_created_during_steps": (on_t.events_created_during_steps
+                                        + off_t.events_created_during_steps),
         "overhead_pct": T.paired_overhead(seq),
         "step_ms": T.stats([ms for o, ms in seq if o]),
         "step_ms_recorder_off": T.stats([ms for o, ms in seq if not o]),
@@ -375,7 +378,9 @@ def run_layer(s: Setup, n: int, level: int) -> dict:
         regions.setdefault(name, r)
     out = {**main, "level": level, "regions": regions}
     out["inner_pass"] = {k: inner[k] for k in ("level", "overhead_pct", "step_ms", "step_ms_recorder_off",
-                                               "events_per_step")}
+                                               "events_per_step", "events_created_during_steps")}
+    if "events_created_while_measuring" in inner:
+        out["inner_pass"]["events_created_while_measuring"] = inner["events_created_while_measuring"]
     return out
 
 
@@ -524,7 +529,7 @@ def run_comm(plan: dict, device: torch.device, reps: int = 30) -> dict:
         dist.all_to_all_single(out, inp)
     T.sync(device)
     dist.barrier()
-    st = T.StepTimer(device)
+    st = T.StepTimer(device, expected_steps=reps)
     for _ in range(reps):
         st.start()
         dist.all_to_all_single(out, inp)
@@ -533,7 +538,12 @@ def run_comm(plan: dict, device: torch.device, reps: int = 30) -> dict:
     worst = torch.tensor([per_call["median"]], device=device, dtype=torch.float64)
     dist.all_reduce(worst, op=dist.ReduceOp.MAX)
     worst = worst.item()
+    # MAX across ranks, outside the measured communication loop.
+    count = torch.tensor([st.events_created_during_steps], device=device, dtype=torch.int64)
+    dist.all_reduce(count, op=dist.ReduceOp.MAX)
+    max_rank_events = int(count.item())
     return {**plan, "measured": True, "world_size": W, "backend": dist.get_backend(),
+            "events_created_during_steps": max_rank_events,
             "per_call_ms": per_call, "per_call_ms_slowest_rank": worst,
             "per_step_ms": worst * plan["calls_per_step"],
             "note": "isolated all-to-all, no overlap with compute; per_step_ms = slowest rank x calls_per_step"}
@@ -744,6 +754,12 @@ def parse(argv):
     return a, ov
 
 
+def warn_timing_allocations(warns: list, count: int, mode: str) -> None:
+    """Record a warning for CUDA event allocations inside timed iterations."""
+    if count > 0:
+        warns.append(f"{count} CUDA timing events were created during {mode} measured steps")
+
+
 def run_once(a, overrides):
     """One complete benchmark run. Returns (exit code, path of the run JSON or None).
 
@@ -821,6 +837,7 @@ def run_once(a, overrides):
             if system.get("slowdown_samples"):
                 warns.append(f"{system['slowdown_samples']} of {system['samples']} samples during the clean steps had "
                              f"a slowdown reason ({', '.join(system['slowdown_reasons'])}): may miss the 5% check")
+        warn_timing_allocations(warns, run["clean"]["events_created_during_steps"], "clean")
         meta["loss_end"] = float(loss)
         if mem:
             run["memory"] = mem
@@ -835,8 +852,13 @@ def run_once(a, overrides):
             if lay["overhead_pct"] is not None and lay["overhead_pct"] > b["max_overhead_pct"]:
                 warns.append(f"recorder overhead {lay['overhead_pct']:.1f}% > {b['max_overhead_pct']}%: "
                              "layer numbers are flagged")
-            if lay.get("events_created_while_measuring"):
-                warns.append(f"{lay['events_created_while_measuring']} CUDA events were created inside measured steps")
+            for pass_name, pass_data in (("layer", lay), ("layer.inner_pass", lay.get("inner_pass") or {})):
+                pool_events = pass_data.get("events_created_while_measuring", 0)
+                if pool_events > 0:
+                    warns.append(f"{pool_events} recorder-pool CUDA events were created during {pass_name} measured steps")
+            layer_events = (lay.get("events_created_during_steps", 0)
+                            + lay.get("inner_pass", {}).get("events_created_during_steps", 0))
+            warn_timing_allocations(warns, layer_events, "layer")
         if "trace" in modes:
             print("[bench] trace ...", flush=True)
             run["trace"] = run_trace(s, b["trace_steps"], tag)
@@ -850,6 +872,9 @@ def run_once(a, overrides):
                     comm = {"moe_a2a": {**plan, "measured": False,
                                         "reason": "one GPU; run: torchrun --nproc_per_node 2 -m perfkit.bench ... --modes comm"}}
             run["comm"] = comm or {"moe_a2a": None}
+            a2a = run["comm"].get("moe_a2a")
+            if a2a:
+                warn_timing_allocations(warns, a2a.get("events_created_during_steps", 0), "communication")
         tel1 = M.gpu_telemetry(device)
     except torch.cuda.OutOfMemoryError:
         Bn, Tn, V = s.loader.B, s.loader.T, s.mcfg.vocab_size
