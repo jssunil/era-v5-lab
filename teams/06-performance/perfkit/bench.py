@@ -295,7 +295,7 @@ def reversible_check(s: Setup) -> float:
 # ------------------------------------------------------------------------------ modes
 
 def run_clean(s: Setup, n: int):
-    st = T.StepTimer(s.device)
+    st = T.StepTimer(s.device, expected_steps=n)
     data, loss = [], None
     if s.device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(s.device)
@@ -323,7 +323,8 @@ def layer_pass(s: Setup, n: int, max_level: int, warm: int = 2) -> dict:
     if pool is not None:
         pool.reserve(4 * n_ev + 64)       # no event is created inside a measured step
         created = pool.created
-    on_t, off_t = T.StepTimer(s.device), T.StepTimer(s.device)
+    on_t, off_t = (T.StepTimer(s.device, expected_steps=n),
+                   T.StepTimer(s.device, expected_steps=n))
     order, pending, parts, data_host = [], deque(), [], []
     for i in range(2 * n):
         on = i % 2 == 1
