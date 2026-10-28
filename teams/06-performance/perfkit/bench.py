@@ -88,6 +88,7 @@ import re
 import subprocess
 import sys
 import time
+import warnings
 from collections import deque
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -107,28 +108,17 @@ from perfkit import metrics as M  # noqa: E402
 from perfkit import parts as P  # noqa: E402
 from perfkit import timer as T  # noqa: E402
 from perfkit.regions import phase, point, region, use_recorder  # noqa: E402
+from perfkit.report import ab_note, compare_config_value, compare_lines  # noqa: E402
 from perfkit.schema import validate_run  # noqa: E402
 
 BENCH_VERSION = 1
 CACHE = Path(os.environ.get("ERA_PERF_CACHE", "~/.cache/era-perf")).expanduser()
 AMP = {"bf16": torch.bfloat16, "fp16": torch.float16, "fp32": None}
 MODES = ("clean", "layer", "trace", "checkpoint", "comm")
-# Config that changes the work a step does: two runs that differ here are not compared (quick_compare).
+# Config that changes the work a step does: two runs that differ here are not compared (quick_compare),
+# except in report.IMPL_SWITCHES (an A/B of one implementation switch, labelled by report.ab_note).
 # (section, key); key None = the whole section.
 COMPARE_CONFIG = [("model", None), ("optim", None), ("run", "compile"), ("run", "grad_clip"), ("data", "source")]
-
-def _compare_config_value(config: dict, section: str, key: str | None):
-    value = config.get(section, {}) if key is None else config.get(section, {}).get(key)
-    if section == "model" and key is None and isinstance(value, dict):
-        moe = value.get("moe")
-        if isinstance(moe, dict):
-            # Allow an A/B timing of the same MoE model with only its dispatch implementation changed.
-            value = {**value, "moe": {k: v for k, v in moe.items() if k != "dispatch"}}
-    if section == "optim" and key is None and isinstance(value, dict):
-        # muon_impl is an implementation switch: these two runs intentionally do different
-        # work only in how the same Muon update is executed, so allow a paired timing comparison.
-        value = {k: v for k, v in value.items() if k != "muon_impl"}
-    return value
 
 
 # ------------------------------------------------------------------------------ build
@@ -405,6 +395,8 @@ def run_trace(s: Setup, steps: int, tag: str) -> dict:
         except Exception as e:  # a full disk must not lose the rest of the run
             print(f"[bench] could not write the trace: {e}")
 
+    # One profiler cycle on purpose: its "clears events at the end of each cycle" warning is noise here.
+    warnings.filterwarnings("ignore", message="Profiler clears events")
     with profile(activities=acts, schedule=schedule(wait=0, warmup=1, active=steps, repeat=1),
                  on_trace_ready=export) as prof:
         for _ in range(steps + 1):
@@ -590,27 +582,29 @@ def summary(run: dict, gate_level: int) -> str:
         f"commit {str(me['commit'])[:10]}{' (DIRTY)' if me.get('dirty') else ''} | tag {me['tag']}",
         f"step  median {_f(st['median'])} ms  p10 {_f(st['p10'])}  p90 {_f(st['p90'])}  spread {_f(st['spread_pct'], 1)}%"
         f"   data {_f(c['data_ms']['median'], 3)} ms",
-        f"      {m['tokens_per_s']:,.0f} tokens/s   MFU {_f(100 * m['mfu'], 1) if m['mfu'] else '-'}%"
-        f"   HFU {_f(100 * m['hfu'], 1) if m['hfu'] else '-'}%"
+        f"      {m['tokens_per_s']:,.0f} tokens/s   MFU {_f(100 * m['mfu'], 1) + '%' if m['mfu'] else 'n/a'}"
+        f"   HFU {_f(100 * m['hfu'], 1) + '%' if m['hfu'] else 'n/a'}"
         + (f"   peak mem {run['memory']['peak_allocated_gb']:.2f} GB" if run.get("memory") else ""),
     ]
     lay = run.get("layer")
     if lay:
         base = lay["step_ms"]["median"] or 1
-        lines += ["", f"parts (gated: level <= {gate_level})  recorder overhead {_f(lay['overhead_pct'], 2)}%",
+        lines += ["", f"parts under the 5% rule (level <= {gate_level}), recorder overhead {_f(lay['overhead_pct'], 2)}%",
                   f"  {'part':<34}{'median ms':>11}{'p10..p90':>19}{'% step':>8}{'spread%':>9}{'lvl':>4}{'calls':>6}"]
         for name, r in lay["regions"].items():
             if r["level"] <= gate_level:
-                lines.append(f"  {name:<34}{_f(r['median'], 3):>11}{_f(r['p10'], 2) + '..' + _f(r['p90'], 2):>19}"
+                # phase, then its parts, then the blocks of the stack: indented so the tree reads top-down
+                indent = "" if ":" not in name else "    " if re.search(r":block\d+$", name) else "  "
+                lines.append(f"  {indent + name:<34}{_f(r['median'], 3):>11}{_f(r['p10'], 2) + '..' + _f(r['p90'], 2):>19}"
                              f"{_f(100 * r['median'] / base, 1):>8}{_f(r['spread_pct'], 1):>9}{r['level']:>4}"
                              f"{r['calls_per_step']:>6}")
         inner = {}
         for name, r in lay["regions"].items():
             if r["level"] > gate_level:
-                key = re.sub(r"block\d+", "block*", name)
+                key = re.sub(r"expert\d+", "expert*", re.sub(r"block\d+", "block*", name))
                 inner[key] = inner.get(key, 0.0) + r["median"]
         if inner:
-            lines += ["", "inside the blocks (information only, summed over layers), top 15:"]
+            lines += ["", "inside the blocks (information only, not gated; summed over layers), top 15:"]
             for k in sorted(inner, key=inner.get, reverse=True)[:15]:
                 lines.append(f"  {k:<44}{_f(inner[k], 3):>10} ms{_f(100 * inner[k] / base, 1):>7}%")
     if run.get("checkpoint"):
@@ -628,8 +622,9 @@ def summary(run: dict, gate_level: int) -> str:
     tr = run.get("trace")
     if tr and tr.get("parts"):
         lines.append("\nslowest parts (summed over layers):")
+        pw = max(40, *(len(p["part"]) + 2 for p in tr["parts"]))
         for i, p in enumerate(tr["parts"], 1):
-            lines.append(f"  {i}. {p['part']:<40}{_f(p['ms'], 2):>10} ms{_f(p['pct'], 1):>7}%  trace {p['file'] or '-'}")
+            lines.append(f"  {i}. {p['part']:<{pw}}{_f(p['ms'], 2):>10} ms{_f(p['pct'], 1):>7}%  trace {p['file'] or '-'}")
     sy = run.get("system")
     if sy:
         mt = sy["metrics"]
@@ -655,8 +650,8 @@ def quick_compare(a: dict, b: dict, tol_pct: float, gate_level: int) -> tuple:
         if a["meta"].get(k) != b["meta"].get(k):
             problems.append(f"different {k}: {a['meta'].get(k)} vs {b['meta'].get(k)}")
     for section, key in COMPARE_CONFIG:                  # what changes the work a step does
-        va = _compare_config_value(a["config"], section, key)
-        vb = _compare_config_value(b["config"], section, key)
+        va = compare_config_value(a["config"], section, key)
+        vb = compare_config_value(b["config"], section, key)
         if va != vb:
             problems.append(f"different {section} config" if key is None else
                             f"different {section}.{key}: {va} vs {vb}")
@@ -904,12 +899,9 @@ def run_once(a, overrides):
         other = json.loads(Path(a.against).read_text())
         tol = cfg.get("report", {}).get("tol_pct", 5.0)
         rows, ok, why = quick_compare(run, other, tol, gate)
-        print(f"\nagainst {a.against} (tol {tol}%, level <= {gate}):")
-        for w in why:
-            print(f"  [refuse] {w}")
-        for name, x, y, diff, verdict in rows:
-            print(f"  {name:<34}{_f(x, 3):>11}{_f(y, 3):>11}{_f(diff, 2):>8}%  {verdict}")
-        print(f"  {'PASS' if ok else 'FAIL'}")
+        print(f"\nagainst {_show(Path(a.against))} (ms)")
+        for line in compare_lines(rows, ok, why, ab_note(run, other), tol, gate):
+            print(line)
         if not ok:
             code = code or 2
     return code, path
@@ -1025,13 +1017,13 @@ def rule_checks(run: dict, modes: list, cfg: dict) -> list:
     wanted = ("checkpoint", "comm") if cfg.get("model", {}).get("ffn") == "moe" else ("checkpoint",)
     missing = [m for m in wanted if m not in modes]          # comm = the MoE all-to-all: dense models have none
     if missing:
-        out.append(f"rule 3b: {' and '.join(missing)} not measured; add them with --modes")
+        out.append(f"rule 3b: {' and '.join(missing)} not measured; add {','.join(missing)} to --modes")
     if run.get("layer"):
         noisy = [n for n, r in run["layer"]["regions"].items()
                  if r["level"] <= cfg.get("report", {}).get("gate_level", 2) and (r["spread_pct"] or 0) > 10]
         if noisy:
             out.append(f"{len(noisy)} gated part(s) have p10..p90 spread > 10%, so may miss the 5% check: "
-                       + ", ".join(noisy[:6]))
+                       + ", ".join(noisy[:6]) + (f" (+{len(noisy) - 6} more)" if len(noisy) > 6 else ""))
     if me["device"] == "mps":
         out.append("MPS has no reliable timing events: parts were timed with a sync at every boundary")
     if cfg["run"].get("compile") and run.get("layer"):

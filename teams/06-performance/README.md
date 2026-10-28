@@ -30,12 +30,7 @@ Everything is driven by config: a new model is a new YAML file in `configs/`, no
 
 `model.moe.dispatch=loop|sorted` selects the reference per-expert gather or the sorted dispatch. The sorted path orders token/expert assignments, packs them into a padded per-expert buffer and runs each expert MLP as one batched matmul. Its scatters and gathers use unique indices, so gradients are bit-identical across runs on CUDA. It reads back only the largest per-expert route count (one host sync per layer call). For an idle expert it produces zero gradient tensors where the loop leaves gradients as `None`; this can change optimizer-state updates, so `loop` remains the default pending an optimizer-safe treatment and server benchmark. Run the dispatch checks with `python -m pytest correctness/test_moe.py -q`.
 
-`optim.muon_impl=loop|batched` selects the per-matrix Muon reference or shape-batched Newton–Schulz path. The benchmark comparison permits this implementation switch while still requiring the same model, optimizer settings, device, dtype, and data. Compare both paths from one clean commit:
-
-```bash
-python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_loop report.gate_level=3 optim.muon_impl=loop
-python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_batched --against results/runs/muon_loop.json report.gate_level=3 optim.muon_impl=batched
-```
+`optim.muon_impl=loop|batched` selects the per-matrix Muon reference or shape-batched Newton–Schulz path. The benchmark comparison permits this implementation switch while still requiring the same model, optimizer settings, device, dtype, and data. Compare both paths from one clean commit (A/B commands in "Timing" below).
 
 ## Folder layout
 
@@ -150,14 +145,23 @@ python -m perfkit.bench --config configs/lab_small.yaml --level 3 --tag b --agai
 torchrun --nproc_per_node 2 -m perfkit.bench --config configs/lab_small.yaml --modes comm               # 2+ GPUs
 ```
 
-For an MoE dispatch comparison, use the same model and input source, changing only the dispatch override. `--against` accepts that implementation switch and still checks the GPU, dtype, batch, sequence length and all other model settings:
+A/B of an implementation switch (`model.moe.dispatch`, `optim.muon_impl`): same commit, GPU, batch, dtype and data, only the switch changes. `--against` accepts the switch, still checks everything else, and labels the verdict `(A/B)`: a gated part outside 5% there is the speedup being measured, not a failed check.
 
 ```bash
-python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag moe_loop report.gate_level=3 data.source=synthetic model.moe.dispatch=loop
-python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag moe_sorted --against results/runs/moe_loop.json report.gate_level=3 data.source=synthetic model.moe.dispatch=sorted
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag moe_loop model.moe.dispatch=loop
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag moe_sorted --against results/runs/moe_loop.json model.moe.dispatch=sorted
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_loop optim.muon_impl=loop
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_batched --against results/runs/muon_loop.json optim.muon_impl=batched
 ```
 
-Compare the clean step median/tokens per second and the level-3 `blockN.moe.dispatch` regions for MoE (or `opt.muon.ns` for Muon). `report.gate_level=3` makes these inner regions part of the 5% gate; without it, they are informational. Keep the same GPU, batch, dtype and source for both runs. The defaults use 10 warmup and 150 measured steps; shorten with matching `--steps 30 --warmup 5` only for an initial check.
+Read the clean step median, tokens/s, and the level-3 `blockN.moe.dispatch` or `opt.muon.ns` rows (information only). Keep the default `report.gate_level=2`: the 5% rule covers the step parts and whole blocks, not the parts inside a block (instructor rule 3a). Use real data: the sorted dispatch pads every expert to the busiest one, and synthetic tokens hide routing skew.
+
+The 5% rule itself is two runs of one implementation. Before switching a default, each side must pass it:
+
+```bash
+python -m perfkit.bench --config configs/lab_small.yaml --level 3 --repeat 2 --tag moe_sorted_rep model.moe.dispatch=sorted
+python -m perfkit.bench --config configs/lab_small.yaml --level 3 --repeat 2 --tag muon_batched_rep optim.muon_impl=batched
+```
 
 Defaults (`configs/base.yaml`, `bench:`): all modes (clean, layer, trace, checkpoint, comm), 150 measured steps
 after 10 warmup, 10 checkpoint saves after one warm save that is not counted. `run.batch_size: auto` uses the

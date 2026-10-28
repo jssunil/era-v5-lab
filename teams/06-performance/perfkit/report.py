@@ -10,7 +10,8 @@ MVP
     (ms, p90, % of step, level), "time by part type" (sum over layers), five slowest leaf parts.
   * compare(a, b, tol_pct=5, gate_level=2) -> (rows, ok, problems): the whole step plus every region with
     level <= gate_level must be within tol_pct. NO exemption for small parts. Refuse runs on different
-    GPUs or with different configs. Level-3 rows are listed as information only.
+    GPUs or with different configs. Level-3 rows are listed as information only. Runs that differ only in
+    an IMPL_SWITCHES entry are compared and labelled A/B (ab_note).
   * baseline_md(...): GPU name, commit, config, PASS/FAIL, the comparison table.
   * slowest_md(run): five slowest parts, each: ms and % of step, why (bound + evidence), trace reference,
     one week-2 idea.
@@ -35,16 +36,98 @@ COMPARE_CONFIG = [
 ]
 
 
-def _compare_config_value(config: dict, section: str, key: str | None):
+# Implementation switches: the same model and update, computed another way. Two runs that differ only in
+# these are compared (an A/B timing), and the verdict is labelled A/B: a part outside tol_pct there is the
+# change being measured. The 5% repeat check stays two runs of one implementation (bench --repeat).
+IMPL_SWITCHES = [("model", "moe", "dispatch"), ("optim", "muon_impl")]
+
+
+def _switch_value(config: dict, path: tuple):
+    for k in path:
+        if not isinstance(config, dict):
+            return None
+        config = config.get(k)
+    return config
+
+
+def compare_config_value(config: dict, section: str, key: str | None):
+    """config[section] (key None) or config[section][key], without the IMPL_SWITCHES."""
     value = config.get(section, {}) if key is None else config.get(section, {}).get(key)
-    if section == "model" and key is None and isinstance(value, dict):
-        moe = value.get("moe")
-        if isinstance(moe, dict):
-            value = {**value, "moe": {k: v for k, v in moe.items() if k != "dispatch"}}
-    if section == "optim" and key is None and isinstance(value, dict):
-        # Permit a controlled implementation comparison for the same Muon update.
-        value = {k: v for k, v in value.items() if k != "muon_impl"}
+    if key is not None or not isinstance(value, dict):
+        return value
+    for path in IMPL_SWITCHES:
+        if path[0] != section:
+            continue
+        *parents, leaf = path[1:]
+        if not parents:
+            value = {k: v for k, v in value.items() if k != leaf}
+        elif isinstance(value.get(parents[0]), dict):
+            value = {**value, parents[0]: {k: v for k, v in value[parents[0]].items() if k != leaf}}
     return value
+
+
+def impl_differences(a: dict, b: dict) -> list[str]:
+    """The IMPL_SWITCHES two runs differ in, e.g. ["model.moe.dispatch: sorted vs loop"]."""
+    out = []
+    for path in IMPL_SWITCHES:
+        va, vb = _switch_value(a.get("config", {}), path), _switch_value(b.get("config", {}), path)
+        if va != vb:
+            out.append(f"{'.'.join(path)}: {va} vs {vb}")
+    return out
+
+
+def ab_note(a: dict, b: dict) -> str | None:
+    diffs = impl_differences(a, b)
+    if not diffs:
+        return None
+    return f"A/B of {'; '.join(diffs)}: a gap above tol_pct is the change being measured, not a failed repeat"
+
+
+def _change(x, y, diff) -> str:
+    """This run against the other: '12.3% faster' = 12.3% less time, '4.1% slower' = 4.1% more time.
+    The result column uses the gate's own gap (slower / faster - 1), so very near tol_pct the two can differ."""
+    if diff is None or x is None or y is None:
+        return "-"
+    if x == y:
+        return "same"
+    if not y:
+        return "inf"
+    pct = 100 * (x - y) / y
+    if abs(pct) < 0.05:
+        return "same"
+    return f"{abs(pct):.1f}% {'faster' if pct < 0 else 'slower'}"
+
+
+def compare_lines(rows, ok: bool, problems: list, note: str | None, tol_pct: float, gate_level: int,
+                  this: str = "this run", other: str = "against") -> list[str]:
+    """The console table for bench --against and report --compare: gated rows, then one verdict line."""
+    w = max([34] + [len(r[0]) + 2 for r in rows if r[4] != "info"])
+    lines = [f"5% check: step, step parts and whole blocks (level <= {gate_level}), tol {tol_pct:g}%"]
+    lines += [f"  REFUSED  {p}" for p in problems]
+    if note:
+        lines.append(f"  {note}")
+    lines.append(f"  {'part':<{w}}{this:>12}{other:>12}  {'change':<16}result")
+    gated = [r for r in rows if r[4] != "info"]
+    for name, x, y, diff, verdict in gated:
+        mark = {"ok": "ok", "FAIL": "OUTSIDE", "MISSING": "MISSING"}.get(verdict, verdict)
+        lines.append(f"  {name:<{w}}{_f(x):>12}{_f(y):>12}  {_change(x, y, diff):<16}{mark}")
+    info = len(rows) - len(gated)
+    if info:
+        lines.append(f"  ({info} parts inside blocks: information only, see the .md)")
+    bad = [r for r in gated if r[4] != "ok"]
+    if problems:
+        verdict = f"REFUSED: {len(problems)} reason(s) above; these runs cannot be compared"
+    elif note:
+        faster = sum(1 for r in gated if r[4] == "FAIL" and r[1] < r[2])
+        slower = sum(1 for r in gated if r[4] == "FAIL" and r[1] > r[2])
+        verdict = (f"A/B: {faster} part(s) faster, {slower} slower, {len(gated) - len(bad)} within {tol_pct:g}%"
+                   + (f", {sum(1 for r in bad if r[4] == 'MISSING')} missing" if any(r[4] == "MISSING" for r in bad) else ""))
+    elif ok:
+        verdict = f"PASS: all {len(gated)} gated parts within {tol_pct:g}%"
+    else:
+        verdict = f"FAIL: {len(bad)} of {len(gated)} gated parts outside {tol_pct:g}% or missing"
+    lines.append(f"  {verdict}")
+    return lines
 
 
 def _f(x, digits=3):
@@ -106,8 +189,8 @@ def _refuse(a: dict, b: dict) -> list[str]:
     if _seq_len(a) != _seq_len(b):
         problems.append(f"different seq_len: {_seq_len(a)} vs {_seq_len(b)}")
     for section, key in COMPARE_CONFIG:
-        va = _compare_config_value(a.get("config", {}), section, key)
-        vb = _compare_config_value(b.get("config", {}), section, key)
+        va = compare_config_value(a.get("config", {}), section, key)
+        vb = compare_config_value(b.get("config", {}), section, key)
         if va != vb:
             if key is None:
                 problems.append(f"different {section} config")
@@ -294,9 +377,10 @@ def compare(a: dict, b: dict, tol_pct: float = 5.0, gate_level: int = 2):
 def baseline_md(a: dict, b: dict, rows, ok, problems) -> str:
     meta_a = a.get("meta") or {}
     meta_b = b.get("meta") or {}
-    verdict = "PASS" if ok else "FAIL"
+    note = ab_note(a, b)
+    verdict = "REFUSED" if problems else "A/B (see the change column)" if note else "PASS" if ok else "FAIL"
     lines = [
-        f"# Baseline comparison — {verdict}",
+        f"# {'A/B' if note else 'Baseline'} comparison — {verdict}",
         "",
         f"**GPU:** {meta_a.get('gpu')} (vs {meta_b.get('gpu')})",
         f"**commit a:** `{meta_a.get('commit')}`",
@@ -306,6 +390,8 @@ def baseline_md(a: dict, b: dict, rows, ok, problems) -> str:
         f"**result:** {verdict}",
         "",
     ]
+    if note:
+        lines += [f"**{note}**", ""]
     if problems:
         lines.append("## Refuse / problems")
         lines.append("")
@@ -313,16 +399,19 @@ def baseline_md(a: dict, b: dict, rows, ok, problems) -> str:
             lines.append(f"- {p}")
         lines.append("")
 
+    ta, tb = meta_a.get("tag") or "a", meta_b.get("tag") or "b"
     lines += [
         "## Comparison table",
         "",
-        "| part | a ms | b ms | diff % | verdict |",
-        "| :--- | ---: | ---: | ---: | :--- |",
+        f"Gated rows first (the 5% rule), then the parts inside blocks (information only). "
+        f"The change says how `{ta}` compares with `{tb}`.",
+        "",
+        f"| part | {ta} ms | {tb} ms | change | result |",
+        "| :--- | ---: | ---: | :--- | :--- |",
     ]
     for name, x, y, diff, verdict_row in rows:
-        lines.append(
-            f"| {name} | {_f(x)} | {_f(y)} | {_f(diff, 2) if diff is not None else '-'} | {verdict_row} |"
-        )
+        mark = {"ok": "ok", "FAIL": "**outside**", "MISSING": "**missing**"}.get(verdict_row, verdict_row)
+        lines.append(f"| {name} | {_f(x)} | {_f(y)} | {_change(x, y, diff)} | {mark} |")
     lines.append("")
     return "\n".join(lines)
 
@@ -374,9 +463,10 @@ def main(argv=None) -> int:
     if args.compare:
         other = json.loads(Path(args.compare).read_text(encoding="utf-8"))
         rows, ok, problems = compare(run, other, tol_pct=args.tol_pct, gate_level=args.gate_level)
-        for p in problems:
-            print(f"[refuse] {p}")
-        print(f"[report] compare: {'PASS' if ok else 'FAIL'}")
+        tags = ((run.get("meta") or {}).get("tag") or "this run", (other.get("meta") or {}).get("tag") or "against")
+        print(f"\n[report] {tags[0]} vs {tags[1]} (ms)")
+        for line in compare_lines(rows, ok, problems, ab_note(run, other), args.tol_pct, args.gate_level, *tags):
+            print(line)
         if args.baseline:
             Path(args.baseline).write_text(baseline_md(run, other, rows, ok, problems), encoding="utf-8")
             print(f"[report] baseline -> {args.baseline}")
