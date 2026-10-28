@@ -116,11 +116,14 @@ meta:      gpu, gpu_spec, torch, cuda, driver, device, commit, dirty, config_fil
             loss_after_first_step, loss_end, compute_capability, sm_count, gpu_mem_gb, gpu_count,
             telemetry_start, telemetry {after_warmup, end}]
 config:    run, data, model, optim, bench                        the full merged config
-clean:     step_ms {median,p10,p90,iqr,n}, data_ms {median,p10,p90,iqr,n}       [raw_step_ms]
+clean:     step_ms {median,p10,p90,iqr,n}, data_ms {median,p10,p90,iqr,n}
+           [raw_step_ms, events_created_during_steps]
 layer:     level, overhead_pct, step_ms, step_ms_recorder_off,
            regions { "<phase>:<name>": {median,p10,p90,iqr,n,level,calls_per_step} }  [each region: pass]
-           [data_host_ms, data_note, events_per_step, steps, events_created_while_measuring,
-            inner_pass {level, overhead_pct, step_ms, step_ms_recorder_off, events_per_step}]
+           [data_host_ms, data_note, events_per_step, steps, events_created_during_steps,
+            events_created_while_measuring,
+            inner_pass {level, overhead_pct, step_ms, step_ms_recorder_off, events_per_step,
+                        events_created_during_steps, events_created_while_measuring}]
 trace:     trace_file, top_ops, gpu_busy_pct, kernels_per_step
            [steps, host_syncs_per_step, sync_sites, parts_note,
             parts [{part, ms, pct, instances, level, region, file, bytes, calls_in_step, calls_kept, gpu_events}]]
@@ -133,7 +136,8 @@ metrics:   tokens_per_step, tokens_per_s, mfu, params_total, params_active, mode
 [goodput]: badput_s {startup, first_step, warmup}                [time_goodput, token_goodput_per_s: to write]
 [checkpoint]: save_ms, to_cpu_ms, write_ms {stats}, size_mb, write_mb_per_s, level, repeats, where
 [comm]:    moe_a2a {bytes_per_call, payload_mb_per_call, payload_dtype, calls_per_layer, calls_per_step, dtype,
-           level, measured, [reason] | [world_size, backend, per_call_ms, per_call_ms_slowest_rank, per_step_ms]}
+           level, measured, [reason] | [world_size, backend, per_call_ms, per_call_ms_slowest_rank,
+           per_step_ms, events_created_during_steps (max across ranks)]}
 [warnings]: ["..."]                                               rule checks and noisy parts, in words
 ```
 
@@ -235,3 +239,7 @@ docstring has the full MVP, the extras and "done when".
 3. `docs/METRICS.md`, for the G8 hand-off (`metrics.py` is done).
 4. `report.py` with the 5% compare.
 5. Two baseline runs on one GPU, then `results/baseline_v0.md` and `results/slowest5_v0.md`.
+
+Counters describe Python Event objects, not guaranteed CUDA runtime handle creation.
+StepTimer counters remain cumulative across resets; recorder-pool counts are separate.
+Communication reports the maximum allocation count across distributed ranks.

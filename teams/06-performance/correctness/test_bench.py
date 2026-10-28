@@ -673,3 +673,32 @@ def test_communication_warning_is_emitted_only_for_nonzero_counter():
     bench.warn_timing_allocations(warns, 3, "communication")
     assert len(warns) == 1
     assert "3 CUDA timing events" in warns[0] and "communication" in warns[0]
+
+
+# Sunil PR24 review regression: inner recorder-pool reporting
+def test_inner_pool_warning_and_json(tmp_path, monkeypatch):
+    real = bench.run_layer
+    def injected(s, n, level):
+        result = real(s, n, level)
+        result["inner_pass"]["events_created_while_measuring"] = 57
+        return result
+    monkeypatch.setattr(bench, "run_layer", injected)
+    _run_main(tmp_path / "runs", "inner-pool", "--modes", "clean,layer", "--level", "3")
+    run = json.loads((tmp_path / "runs" / "inner-pool.json").read_text())
+    assert run["layer"]["inner_pass"]["events_created_while_measuring"] == 57
+    assert any("57 recorder-pool CUDA events" in w and "layer.inner_pass" in w for w in run["warnings"])
+
+
+def test_run_layer_copies_inner_pool_count(monkeypatch):
+    real = bench.layer_pass
+    calls = {"n": 0}
+    def injected(s, n, level, warm=2):
+        result = real(s, n, level, warm)
+        calls["n"] += 1
+        if calls["n"] == 2:
+            result["events_created_while_measuring"] = 57
+        return result
+    monkeypatch.setattr(bench, "layer_pass", injected)
+    s = bench.build(tiny_cfg(), torch.device("cpu"))
+    result = bench.run_layer(s, 1, 3)
+    assert result["inner_pass"]["events_created_while_measuring"] == 57

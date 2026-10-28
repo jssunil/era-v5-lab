@@ -344,3 +344,25 @@ def test_cuda_reset_synchronizes_before_event_reuse(monkeypatch):
     t.stop()
     assert len(made) == 2
     assert t.events_created_during_steps == 0
+
+
+# Sunil PR24 review regression: cumulative fallback allocation count
+def test_cuda_counter_remains_cumulative_across_reset(monkeypatch):
+    class FakeEvent:
+        def __init__(self, enable_timing=False):
+            assert enable_timing
+        def record(self): pass
+        def synchronize(self): pass
+        def query(self): return True
+        def elapsed_time(self, other): return 1.0
+    monkeypatch.setattr(torch.cuda, "Event", FakeEvent)
+    timer = StepTimer(torch.device("cuda"), expected_steps=1)
+    for _ in range(2):
+        timer.start()
+        timer.stop()
+    assert timer.events_created_during_steps == 2
+    timer.reset()
+    assert timer.events_created_during_steps == 2
+    timer.start()
+    timer.stop()
+    assert timer.events_created_during_steps == 2

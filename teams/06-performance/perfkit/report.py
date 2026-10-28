@@ -211,14 +211,18 @@ def render(run: dict) -> str:
         ("clean", clean.get("events_created_during_steps")),
         ("layer", layer.get("events_created_during_steps")),
         ("layer.inner_pass", (layer.get("inner_pass") or {}).get("events_created_during_steps")),
-        ("communication", comm.get("events_created_during_steps")),
+        ("layer.recorder_pool", layer.get("events_created_while_measuring")),
+        ("layer.inner_pass.recorder_pool", (layer.get("inner_pass") or {}).get("events_created_while_measuring")),
+        ("communication.max_rank", comm.get("events_created_during_steps")),
     ]
     warnings = run.get("warnings") or []
     lines += ["## Diagnostics", "", "### CUDA timing-event allocations", ""]
     for stage, count in allocations:
         if count is not None:
             status = "WARN" if count > 0 else "OK"
-            lines.append(f"- [{status}] {stage}: events_created_during_steps={count}")
+            field = ("events_created_while_measuring" if stage.endswith(".recorder_pool")
+                     else "events_created_during_steps")
+            lines.append(f"- [{status}] {stage}: {field}={count}")
     if all(count is None for _, count in allocations):
         lines.append("- NOT REPORTED (legacy run JSON)")
     lines += ["", "### Benchmark warnings", ""]
@@ -226,9 +230,7 @@ def render(run: dict) -> str:
         lines.extend(f"- [warn] {message}" for message in warnings)
     else:
         lines.append("- None recorded")
-    lines += ["", "Note: timing warnings do not represent numerical correctness "
-              "test failures. Consult pytest output for test names, XFAIL reasons, "
-              "and fp64-reference error tables.", ""]
+    lines += [""]
 
     regions = _regions(run)
     if regions:

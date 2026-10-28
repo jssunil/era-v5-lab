@@ -376,6 +376,8 @@ def run_layer(s: Setup, n: int, level: int) -> dict:
     out = {**main, "level": level, "regions": regions}
     out["inner_pass"] = {k: inner[k] for k in ("level", "overhead_pct", "step_ms", "step_ms_recorder_off",
                                                "events_per_step", "events_created_during_steps")}
+    if "events_created_while_measuring" in inner:
+        out["inner_pass"]["events_created_while_measuring"] = inner["events_created_while_measuring"]
     return out
 
 
@@ -531,8 +533,12 @@ def run_comm(plan: dict, device: torch.device, reps: int = 30) -> dict:
     worst = torch.tensor([per_call["median"]], device=device, dtype=torch.float64)
     dist.all_reduce(worst, op=dist.ReduceOp.MAX)
     worst = worst.item()
+    # MAX across ranks, outside the measured communication loop.
+    count = torch.tensor([st.events_created_during_steps], device=device, dtype=torch.int64)
+    dist.all_reduce(count, op=dist.ReduceOp.MAX)
+    max_rank_events = int(count.item())
     return {**plan, "measured": True, "world_size": W, "backend": dist.get_backend(),
-            "events_created_during_steps": st.events_created_during_steps,
+            "events_created_during_steps": max_rank_events,
             "per_call_ms": per_call, "per_call_ms_slowest_rank": worst,
             "per_step_ms": worst * plan["calls_per_step"],
             "note": "isolated all-to-all, no overlap with compute; per_step_ms = slowest rank x calls_per_step"}
@@ -838,8 +844,10 @@ def run_once(a, overrides):
             if lay["overhead_pct"] is not None and lay["overhead_pct"] > b["max_overhead_pct"]:
                 warns.append(f"recorder overhead {lay['overhead_pct']:.1f}% > {b['max_overhead_pct']}%: "
                              "layer numbers are flagged")
-            if lay.get("events_created_while_measuring"):
-                warns.append(f"{lay['events_created_while_measuring']} CUDA events were created inside measured steps")
+            for pass_name, pass_data in (("layer", lay), ("layer.inner_pass", lay.get("inner_pass") or {})):
+                pool_events = pass_data.get("events_created_while_measuring", 0)
+                if pool_events > 0:
+                    warns.append(f"{pool_events} recorder-pool CUDA events were created during {pass_name} measured steps")
             layer_events = (lay.get("events_created_during_steps", 0)
                             + lay.get("inner_pass", {}).get("events_created_during_steps", 0))
             warn_timing_allocations(warns, layer_events, "layer")
