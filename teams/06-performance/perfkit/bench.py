@@ -117,7 +117,6 @@ MODES = ("clean", "layer", "trace", "checkpoint", "comm")
 # (section, key); key None = the whole section.
 COMPARE_CONFIG = [("model", None), ("optim", None), ("run", "compile"), ("run", "grad_clip"), ("data", "source")]
 
-
 def _compare_config_value(config: dict, section: str, key: str | None):
     value = config.get(section, {}) if key is None else config.get(section, {}).get(key)
     if section == "model" and key is None and isinstance(value, dict):
