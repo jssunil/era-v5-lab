@@ -313,8 +313,9 @@ def test_router_runs_in_fp32_under_autocast(device):
     assert torch.equal(amp[0], plain[0]), "routing under bf16 autocast differs from fp32: the router is not in fp32"
 
 
-def test_update_bias_moves_toward_balance(device):
-    m = _moe("loop").to(device)
+@pytest.mark.parametrize("dispatch", list(DISPATCH))
+def test_update_bias_moves_toward_balance(dispatch, device):
+    m = _moe(dispatch).to(device)
     with torch.no_grad():
         m.router_bias.zero_()
     m.train()

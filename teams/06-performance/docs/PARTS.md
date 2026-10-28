@@ -30,7 +30,7 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 | Output copy + projection | `blockN.attn.proj` (3) | | memory (the copy) | a layout that needs no copy |
 | Dense MLP | `blockN.mlp` (3) | | compute | fused GELU |
 | MoE router: matmul, softmax, top-k, gates | `blockN.moe.router` (3) | | launch | one fused router kernel |
-| MoE dispatch: gather, experts, combine | `blockN.moe.dispatch` (3), `.dispatch.expertE` (3) | `model.moe.dispatch: loop → sorted+grouped` | **host syncs + launch** | sort by expert once, one grouped GEMM |
+| MoE dispatch: gather, experts, combine | `blockN.moe.dispatch` (3), `.dispatch.expertE` (3); sorted path adds `.dispatch.grouped` | `model.moe.dispatch: loop → sorted` | **host syncs + launch** | sort routes, run bounded batched expert matmuls without reading group sizes to the host |
 | Shared experts | `blockN.moe.shared` (3) | | compute | batch with the routed experts |
 | Residual / midpoint arithmetic | inside `blockN` (2) | | memory | fusion |
 | Final LN + LM head + cross-entropy | `head+loss` (2) | `model.ce_impl: torch → chunked → fused` | **memory (fp32 logits)** | fused linear + cross-entropy |

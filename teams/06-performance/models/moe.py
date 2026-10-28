@@ -26,13 +26,15 @@ Lab setting: 1 shared expert (always on) + top-2 routed of 8 (configs/lab_small.
     Without it a reconstructed input that differs by 1e-5 can flip a near-tie token to other experts,
     and the reversible backward rebuilds the wrong state (bf16: gradient errors up to 23%).
     Gates are always recomputed from the router scores, so the router still gets its gradient.
-  * DISPATCH = {"loop": dispatch_loop}: per-expert gather -> expert -> index_add_.
-    Keeps its host syncs (tok.any(), nonzero): it is the baseline we measure, not something to hide.
-    The token counts come from one compare-and-sum over topk_idx (no sync).
+  * DISPATCH = {"loop": dispatch_loop, "sorted": dispatch_sorted}. The loop path gathers per expert and is
+    the reference. The sorted path sorts token/expert assignments and applies expert weights with bounded
+    batched matrix multiplies; it does not read route counts or masks back to the host.
+    Both paths compute token counts with a device-side compare-and-sum over topk_idx. Since sorted packs all
+    expert parameters together, idle experts receive zero gradients rather than None; the loop remains default
+    until the optimizer-state effect of that difference is resolved and server timings are collected.
   * Regions (level 3): f"{name}.router", f"{name}.dispatch", f"{name}.dispatch.expert{e}", f"{name}.shared".
 
 Extra: "dense" dispatch (every expert on every token, exact, slow), capacity factor, aux / z loss.
-New fast dispatches (sort by expert + grouped GEMM, ...) are new DISPATCH entries.
 Done when: correctness/test_moe.py passes for every entry in DISPATCH.
 """
 from __future__ import annotations
@@ -77,7 +79,60 @@ def dispatch_loop(moe, x, topk_idx, gates):
     return out, counts
 
 
-DISPATCH = {"loop": dispatch_loop}
+_SORTED_CHUNK_SIZE = 64
+
+
+def dispatch_sorted(moe, x, topk_idx, gates):
+    """Sort flattened token/expert assignments and process them in bounded batched GEMM chunks.
+
+    Unlike a per-expert mask loop, this path never asks Python whether a route group is empty or how many
+    tokens it contains. The fixed chunk size bounds the temporary expert-weight gathers for long sequences.
+    """
+    n_tokens = x.size(0)
+    flat_experts = topk_idx.reshape(-1)
+    counts = (flat_experts.reshape(-1, 1) == torch.arange(moe.num_experts, device=x.device)).sum(0).float()
+    order = torch.argsort(flat_experts)
+    sorted_experts = flat_experts.index_select(0, order)
+    token_ids = torch.arange(n_tokens, device=x.device).repeat_interleave(moe.top_k).index_select(0, order)
+    sorted_gates = gates.reshape(-1).index_select(0, order)
+
+    # Pack each parameter family once. index_select below gathers only the current chunk's experts.
+    fc_weights = torch.stack([expert.c_fc.weight for expert in moe.experts])
+    fc_biases = torch.stack([expert.c_fc.bias for expert in moe.experts])
+    proj_weights = torch.stack([expert.c_proj.weight for expert in moe.experts])
+    proj_biases = torch.stack([expert.c_proj.bias for expert in moe.experts])
+
+    sorted_updates = []
+    with region(f"{moe.name}.dispatch.grouped", 3):
+        for start in range(0, token_ids.numel(), _SORTED_CHUNK_SIZE):
+            end = min(start + _SORTED_CHUNK_SIZE, token_ids.numel())
+            experts = sorted_experts[start:end]
+            tokens = token_ids[start:end]
+            inputs = x.index_select(0, tokens)
+
+            w1 = fc_weights.index_select(0, experts)
+            b1 = fc_biases.index_select(0, experts)
+            hidden = torch.bmm(w1, inputs.unsqueeze(-1)).squeeze(-1)
+            hidden = F.gelu(hidden + b1.to(hidden.dtype))
+
+            w2 = proj_weights.index_select(0, experts)
+            b2 = proj_biases.index_select(0, experts)
+            updates = torch.bmm(w2, hidden.unsqueeze(-1)).squeeze(-1)
+            updates = updates + b2.to(updates.dtype)
+            updates = updates * sorted_gates[start:end].to(updates.dtype).unsqueeze(1)
+            sorted_updates.append(updates.to(x.dtype))
+
+    if not sorted_updates:
+        return torch.zeros_like(x), counts
+    # Restore the original [token, top-k slot] order, then sum each token's k contributions.
+    # Each output row is reduced locally, avoiding the nondeterministic atomics in index_add_ on CUDA.
+    inverse_order = torch.argsort(order)
+    updates = torch.cat(sorted_updates, dim=0).index_select(0, inverse_order)
+    out = updates.reshape(n_tokens, moe.top_k, x.size(-1)).sum(dim=1)
+    return out, counts
+
+
+DISPATCH = {"loop": dispatch_loop, "sorted": dispatch_sorted}
 
 
 @contextmanager
