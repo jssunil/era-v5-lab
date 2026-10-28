@@ -162,6 +162,11 @@ class StepTimer:
         return out
 
     def reset(self):
+        """Clear recorded steps and recycle completed CUDA events.
+
+        Raises RuntimeError if a step is open. On CUDA, times_ms()
+        synchronizes completed measurements before events are reused.
+        """
         if self._open is not None:
             raise RuntimeError("StepTimer.reset() during an open step")
         if self.kind == "event" and self._pairs:

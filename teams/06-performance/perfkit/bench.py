@@ -292,7 +292,8 @@ def run_clean(s: Setup, n: int):
         data.append(d)
     times = st.times_ms()
     clean = {"step_ms": T.stats(times), "data_ms": T.stats(data),
-             "raw_step_ms": [round(t, 4) for t in times]}
+             "raw_step_ms": [round(t, 4) for t in times],
+             "events_created_during_steps": st.events_created_during_steps}
     return clean, loss, M.memory(s.device)
 
 
@@ -519,7 +520,7 @@ def run_comm(plan: dict, device: torch.device, reps: int = 30) -> dict:
         dist.all_to_all_single(out, inp)
     T.sync(device)
     dist.barrier()
-    st = T.StepTimer(device)
+    st = T.StepTimer(device, expected_steps=reps)
     for _ in range(reps):
         st.start()
         dist.all_to_all_single(out, inp)
@@ -529,6 +530,7 @@ def run_comm(plan: dict, device: torch.device, reps: int = 30) -> dict:
     dist.all_reduce(worst, op=dist.ReduceOp.MAX)
     worst = worst.item()
     return {**plan, "measured": True, "world_size": W, "backend": dist.get_backend(),
+            "events_created_during_steps": st.events_created_during_steps,
             "per_call_ms": per_call, "per_call_ms_slowest_rank": worst,
             "per_step_ms": worst * plan["calls_per_step"],
             "note": "isolated all-to-all, no overlap with compute; per_step_ms = slowest rank x calls_per_step"}
@@ -813,6 +815,9 @@ def run_once(a, overrides):
             if system.get("slowdown_samples"):
                 warns.append(f"{system['slowdown_samples']} of {system['samples']} samples during the clean steps had "
                              f"a slowdown reason ({', '.join(system['slowdown_reasons'])}): may miss the 5% check")
+        if run["clean"]["events_created_during_steps"] > 0:
+            warns.append(f"{run['clean']['events_created_during_steps']} CUDA timing events "
+                         "were created during clean measured steps")
         meta["loss_end"] = float(loss)
         if mem:
             run["memory"] = mem
@@ -842,6 +847,10 @@ def run_once(a, overrides):
                     comm = {"moe_a2a": {**plan, "measured": False,
                                         "reason": "one GPU; run: torchrun --nproc_per_node 2 -m perfkit.bench ... --modes comm"}}
             run["comm"] = comm or {"moe_a2a": None}
+            a2a = run["comm"].get("moe_a2a")
+            if a2a and a2a.get("events_created_during_steps", 0) > 0:
+                warns.append(f"{a2a['events_created_during_steps']} CUDA timing events "
+                             "were created during communication measured steps")
         tel1 = M.gpu_telemetry(device)
     except torch.cuda.OutOfMemoryError:
         Bn, Tn, V = s.loader.B, s.loader.T, s.mcfg.vocab_size
