@@ -203,6 +203,33 @@ def render(run: dict) -> str:
         "",
     ]
 
+    # Diagnostics are observational, not correctness-gate failures. Preserve
+    # exact warning strings from the benchmark rather than reconstructing them.
+    layer = run.get("layer") or {}
+    comm = (run.get("comm") or {}).get("moe_a2a") or {}
+    allocations = [
+        ("clean", clean.get("events_created_during_steps")),
+        ("layer", layer.get("events_created_during_steps")),
+        ("layer.inner_pass", (layer.get("inner_pass") or {}).get("events_created_during_steps")),
+        ("communication", comm.get("events_created_during_steps")),
+    ]
+    warnings = run.get("warnings") or []
+    lines += ["## Diagnostics", "", "### CUDA timing-event allocations", ""]
+    for stage, count in allocations:
+        if count is not None:
+            status = "WARN" if count > 0 else "OK"
+            lines.append(f"- [{status}] {stage}: events_created_during_steps={count}")
+    if all(count is None for _, count in allocations):
+        lines.append("- NOT REPORTED (legacy run JSON)")
+    lines += ["", "### Benchmark warnings", ""]
+    if warnings:
+        lines.extend(f"- [warn] {message}" for message in warnings)
+    else:
+        lines.append("- None recorded")
+    lines += ["", "Note: timing warnings do not represent numerical correctness "
+              "test failures. Consult pytest output for test names, XFAIL reasons, "
+              "and fp64-reference error tables.", ""]
+
     regions = _regions(run)
     if regions:
         lines += [
