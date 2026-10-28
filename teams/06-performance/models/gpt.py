@@ -21,7 +21,7 @@ Parts and where they come from:
     normal(0, 0.02 / sqrt(2 * n_layer)); MoE experts get the same (proj_std). KE initialises its projection.
   * Loss: cfg.ce_impl "torch" materialises fp32 logits [B*T, V] (~8 GB with grads at B=32, T=512);
     "chunked" runs head + cross-entropy in cfg.ce_chunks pieces under activation checkpointing and
-    returns logits=None when targets are given.
+    returns logits=None when targets are given. Both paths average over the targets that are not IGNORE_INDEX.
 
 Timing markers (roofline and report read these names; keep them)
   region("embed", 2)                       around tok + pos embedding (KE adds "embed.ke" at level 3 inside)
@@ -52,6 +52,8 @@ from perfkit.regions import mark, region
 
 
 _SDPA_GQA = tuple(int(v) for v in torch.__version__.split(".")[:2]) >= (2, 5)
+
+IGNORE_INDEX = -100              # a target with this value is left out of the loss and of its divisor (loss masks)
 
 
 def _init_linear(lin: nn.Linear, std: float = 0.02):
@@ -196,16 +198,21 @@ class GPT(nn.Module):
             logits = self.head(x)
             loss = None
             if targets is not None:
-                loss = F.cross_entropy(logits.view(B * T, -1).float(), targets.reshape(B * T))
+                loss = F.cross_entropy(logits.view(B * T, -1).float(), targets.reshape(B * T),
+                                       ignore_index=IGNORE_INDEX)
         return logits, loss
 
     def _chunked_ce(self, x, y):
-        """Compute mean CE in checkpointed position chunks to bound saved logits memory."""
+        """Compute mean CE in checkpointed position chunks to bound saved logits memory.
+
+        Same value as the plain path: the mean is over the targets that are not IGNORE_INDEX, so masked
+        positions (SFT loss masks) do not count in the divisor. If every target is ignored the loss is 0
+        (the plain path gives NaN there)."""
         def piece(xc, yc):
-            return F.cross_entropy(self.head(xc).float(), yc, reduction="sum")
+            return F.cross_entropy(self.head(xc).float(), yc, reduction="sum", ignore_index=IGNORE_INDEX)
         total = sum(torch.utils.checkpoint.checkpoint(piece, xc, yc, use_reentrant=False)
                     for xc, yc in zip(x.chunk(self.cfg.ce_chunks), y.chunk(self.cfg.ce_chunks)))
-        return total / y.numel()
+        return total / (y != IGNORE_INDEX).sum().clamp_min(1)
 
     def param_counts(self):
         """(total, active). active = matmul weights one token multiplies with: attention, router,
