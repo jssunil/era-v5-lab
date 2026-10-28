@@ -14,10 +14,8 @@ from dataio.tokenizer import BrahmicTokenizer
 from models.ke1 import KroneckerEmbedding
 from models.optim import Muon, build_optimizer
 
-fixture = pytest.fixture
 
-
-@fixture(scope="module")
+@pytest.fixture(scope="module")
 def tokenizer():
     return BrahmicTokenizer(os.environ.get("BRAHMIC_TOKENIZER_PATH"))
 

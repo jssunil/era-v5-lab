@@ -20,10 +20,7 @@ import pytest
 
 import torch
 
-parametrize = pytest.mark.parametrize
 from correctness.framework import Case, PAIRS, Pair, check, pair, rel_err, scaled
-
-parametrize = pytest.mark.parametrize
 
 
 def _import_all_test_modules() -> None:
@@ -137,7 +134,7 @@ def test_wrong_shape_fails(device):
         check(p, device)
 
 
-@parametrize("name", sorted(n for n, p in PAIRS.items() if p.drill))
+@pytest.mark.parametrize("name", sorted(n for n, p in PAIRS.items() if p.drill))
 def test_every_registered_pair_scaled_fails(name, device):
     with pytest.raises(AssertionError):
         check(PAIRS[name], device, fast_override=scaled(1.01))
@@ -264,7 +261,7 @@ def test_output_structure_python_float_large_difference_fails(device):
         check(p, device)
 
 
-@parametrize("ref_value,fast_value", [
+@pytest.mark.parametrize("ref_value,fast_value", [
     (float("nan"), float("nan")),
     (float("inf"), float("inf")),
 ])

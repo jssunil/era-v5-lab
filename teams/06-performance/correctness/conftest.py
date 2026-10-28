@@ -15,18 +15,15 @@ from pathlib import Path
 import pytest
 import torch
 
-fixture = pytest.fixture
-hookimpl = pytest.hookimpl
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
-@fixture
+@pytest.fixture
 def device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-@hookimpl(hookwrapper=True)
+@pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()

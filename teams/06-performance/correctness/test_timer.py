@@ -30,7 +30,6 @@ from perfkit import regions
 from perfkit.timer import EventPool, EventRecorder, StepTimer, stats
 
 CPU = torch.device("cpu")
-needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
 
 
 class SpyRecorder:
@@ -204,7 +203,7 @@ def test_stats_of_an_empty_list_has_every_key():
 
 # ------------------------------------------------------------------------------ 3. deferred sync (CUDA)
 
-@needs_cuda
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
 def test_recording_regions_does_not_sync_the_host():
     dev = torch.device("cuda")
     a = torch.randn(512, 512, device=dev)
@@ -228,7 +227,7 @@ def test_recording_regions_does_not_sync_the_host():
     assert b.shape == (512, 512)
 
 
-@needs_cuda
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a CUDA GPU")
 def test_cuda_step_timer_agrees_with_a_synchronized_wall_clock():
     dev = torch.device("cuda")
     a = torch.randn(2048, 2048, device=dev)

@@ -40,7 +40,6 @@ from test_attention import naive_attention
 from models.gpt import GPT
 
 cache = functools.cache
-parametrize = pytest.mark.parametrize
 
 ROOT = Path(__file__).resolve().parents[1]
 B, T, SEED = 2, 64, 0
@@ -223,7 +222,7 @@ def _lab_bf16(device):
                 inputs=[idx, targets], params_ref=_params(ref), params_fast=_params(fast))
 
 
-@parametrize("name", pairs_in(__name__))
+@pytest.mark.parametrize("name", pairs_in(__name__))
 def test_pair(name, device):
     errors = check(PAIRS[name], device)
     assert len([k for k in errors if k.startswith("grad_param")]) > 100, f"{name}: too few gradients compared"
