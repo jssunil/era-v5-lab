@@ -120,6 +120,11 @@ COMPARE_CONFIG = [("model", None), ("optim", None), ("run", "compile"), ("run", 
 
 def _compare_config_value(config: dict, section: str, key: str | None):
     value = config.get(section, {}) if key is None else config.get(section, {}).get(key)
+    if section == "model" and key is None and isinstance(value, dict):
+        moe = value.get("moe")
+        if isinstance(moe, dict):
+            # Allow an A/B timing of the same MoE model with only its dispatch implementation changed.
+            value = {**value, "moe": {k: v for k, v in moe.items() if k != "dispatch"}}
     if section == "optim" and key is None and isinstance(value, dict):
         # muon_impl is an implementation switch: these two runs intentionally do different
         # work only in how the same Muon update is executed, so allow a paired timing comparison.

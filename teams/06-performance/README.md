@@ -28,13 +28,13 @@ Everything is driven by config: a new model is a new YAML file in `configs/`, no
 
 `optim.name=polar_muon_adamw` selects an additional single-process combined optimizer using Polar Express Muon + AdamW updates (including row equilibration, Muon+ norm correction, variance reduction, and cautious Muon decay). It is a separate comparison path; it does not replace the current `muon` implementation. This first integration uses ordinary PyTorch ops; fused kernels, distributed collectives, and sharded optimizer state are not integrated.
 
-`model.moe.dispatch=loop|sorted` selects the reference per-expert gather or the sorted dispatch. The sorted path orders token/expert assignments and executes each expert MLP with bounded batched matrix-multiply chunks, avoiding host reads of per-expert token counts. For an idle expert it produces zero gradient tensors where the loop leaves gradients as `None`; this can change optimizer-state updates, so `loop` remains the default pending an optimizer-safe treatment and server benchmark. Run the dispatch checks with `python -m pytest correctness/test_moe.py -q`; select the alternative in a run with `model.moe.dispatch=sorted`.
+`model.moe.dispatch=loop|sorted` selects the reference per-expert gather or the sorted dispatch. The sorted path orders token/expert assignments and executes each expert MLP with bounded batched matrix-multiply chunks, avoiding host reads of per-expert token counts. For an idle expert it produces zero gradient tensors where the loop leaves gradients as `None`; this can change optimizer-state updates, so `loop` remains the default pending an optimizer-safe treatment and server benchmark. Run the dispatch checks with `python -m pytest correctness/test_moe.py -q`.
 
 `optim.muon_impl=loop|batched` selects the per-matrix Muon reference or shape-batched Newton–Schulz path. The benchmark comparison permits this implementation switch while still requiring the same model, optimizer settings, device, dtype, and data. Compare both paths from one clean commit:
 
 ```bash
-python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_loop optim.muon_impl=loop
-python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_batched --against results/runs/muon_loop.json optim.muon_impl=batched
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_loop report.gate_level=3 optim.muon_impl=loop
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag muon_batched --against results/runs/muon_loop.json report.gate_level=3 optim.muon_impl=batched
 ```
 
 ## Folder layout
@@ -149,6 +149,15 @@ python -m perfkit.bench --config configs/lab_small.yaml --level 3 --tag a       
 python -m perfkit.bench --config configs/lab_small.yaml --level 3 --tag b --against results/runs/a.json # 5% check
 torchrun --nproc_per_node 2 -m perfkit.bench --config configs/lab_small.yaml --modes comm               # 2+ GPUs
 ```
+
+For an MoE dispatch comparison, use the same model and input source, changing only the dispatch override. `--against` accepts that implementation switch and still checks the GPU, dtype, batch, sequence length and all other model settings:
+
+```bash
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag moe_loop report.gate_level=3 data.source=synthetic model.moe.dispatch=loop
+python -m perfkit.bench --config configs/lab_small.yaml --modes clean,layer --level 3 --tag moe_sorted --against results/runs/moe_loop.json report.gate_level=3 data.source=synthetic model.moe.dispatch=sorted
+```
+
+Compare the clean step median/tokens per second and the level-3 `blockN.moe.dispatch` regions for MoE (or `opt.muon.ns` for Muon). `report.gate_level=3` makes these inner regions part of the 5% gate; without it, they are informational. Keep the same GPU, batch, dtype and source for both runs. The defaults use 10 warmup and 150 measured steps; shorten with matching `--steps 30 --warmup 5` only for an initial check.
 
 Defaults (`configs/base.yaml`, `bench:`): all modes (clean, layer, trace, checkpoint, comm), 150 measured steps
 after 10 warmup, 10 checkpoint saves after one warm save that is not counted. `run.batch_size: auto` uses the

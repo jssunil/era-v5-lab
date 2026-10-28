@@ -232,6 +232,15 @@ def test_quick_compare_allows_muon_implementation_variant():
     assert "step (clean)" in [row[0] for row in rows]
 
 
+def test_quick_compare_allows_moe_dispatch_variant():
+    a, b = _two_runs()
+    a["config"]["model"]["moe"] = {"dispatch": "loop", "num_experts": 8}
+    b["config"]["model"]["moe"] = {"dispatch": "sorted", "num_experts": 8}
+    rows, ok, problems = bench.quick_compare(a, b, 5.0, 2)
+    assert ok and not problems
+    assert "step (clean)" in [row[0] for row in rows]
+
+
 def test_quick_compare_only_gates_levels_up_to_gate_level():
     a, b = _two_runs()
     level3 = [n for n, r in a["layer"]["regions"].items() if r["level"] == 3]

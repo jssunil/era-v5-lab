@@ -37,6 +37,10 @@ COMPARE_CONFIG = [
 
 def _compare_config_value(config: dict, section: str, key: str | None):
     value = config.get(section, {}) if key is None else config.get(section, {}).get(key)
+    if section == "model" and key is None and isinstance(value, dict):
+        moe = value.get("moe")
+        if isinstance(moe, dict):
+            value = {**value, "moe": {k: v for k, v in moe.items() if k != "dispatch"}}
     if section == "optim" and key is None and isinstance(value, dict):
         # Permit a controlled implementation comparison for the same Muon update.
         value = {k: v for k, v in value.items() if k != "muon_impl"}
