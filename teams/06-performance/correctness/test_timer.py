@@ -246,3 +246,53 @@ def test_cuda_step_timer_agrees_with_a_synchronized_wall_clock():
     # The event time covers the GPU work only; the wall clock adds launch and sync cost. They must be the
     # same order of magnitude, and the event time cannot exceed the wall time by more than a little.
     assert 0 < event_ms <= wall_ms * 1.5 + 5
+
+
+# ------------------------------------------------------------------------------ event-preallocation regression tests
+
+def test_step_timer_expected_steps_validates_input():
+    with pytest.raises(ValueError):
+        StepTimer(CPU, expected_steps=-1)
+    t = StepTimer(CPU, expected_steps=2)
+    assert t.kind == "wall" and t.events_created_during_steps == 0
+
+
+def test_cuda_event_preallocation_and_exhaustion(monkeypatch):
+    # Fake CUDA events so this regression test also runs on a CPU-only CI worker.
+    class FakeEvent:
+        created = 0
+
+        def __init__(self, enable_timing=False):
+            assert enable_timing
+            FakeEvent.created += 1
+
+        def record(self):
+            pass
+
+        def query(self):
+            return True
+
+        def synchronize(self):
+            pass
+
+        def elapsed_time(self, other):
+            return 1.0
+
+    monkeypatch.setattr(torch.cuda, "Event", FakeEvent)
+    t = StepTimer(torch.device("cuda"), expected_steps=2)
+    assert FakeEvent.created == 4
+    for _ in range(2):
+        t.start()
+        t.stop()
+    assert FakeEvent.created == 4
+    assert t.events_created_during_steps == 0
+    assert t.times_ms() == [1.0, 1.0]
+    t.start()
+    t.stop()
+    assert FakeEvent.created == 6
+    assert t.events_created_during_steps == 2
+    t.reset()
+    assert len(t) == 0
+    t.start()
+    t.stop()
+    assert FakeEvent.created == 6

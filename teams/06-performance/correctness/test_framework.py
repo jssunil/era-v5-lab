@@ -20,10 +20,10 @@ import pytest
 
 import torch
 
-parametrize = pytest.mark.parametrize
 from correctness.framework import Case, PAIRS, Pair, check, pair, rel_err, scaled
 
 parametrize = pytest.mark.parametrize
+
 
 
 def _import_all_test_modules() -> None:

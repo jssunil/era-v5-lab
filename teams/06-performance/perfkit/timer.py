@@ -102,15 +102,27 @@ class StepTimer:
     CPU: perf_counter (exact). MPS: synchronize + perf_counter at start and stop.
     """
 
-    def __init__(self, device):
+    def __init__(self, device, expected_steps: int = 0):
         self.device = _dev(device)
         self.kind = {"cuda": "event", "mps": "sync"}.get(self.device.type, "wall")
+        if expected_steps < 0:
+            raise ValueError("expected_steps must be nonnegative")
         self._pairs = []
         self._open = None
+        # Preallocate both timestamps for every step, outside the measured loop.
+        # Dynamic creation remains a safe fallback if a caller records more steps.
+        self._unused = ([torch.cuda.Event(enable_timing=True)
+                         for _ in range(2 * expected_steps)]
+                        if self.kind == "event" else [])
+        self.events_created_during_steps = 0
 
     def _mark(self):
         if self.kind == "event":
-            ev = torch.cuda.Event(enable_timing=True)
+            if self._unused:
+                ev = self._unused.pop()
+            else:
+                ev = torch.cuda.Event(enable_timing=True)
+                self.events_created_during_steps += 1
             ev.record()
             return ev
         if self.kind == "sync":
@@ -150,8 +162,13 @@ class StepTimer:
         return out
 
     def reset(self):
+        if self._open is not None:
+            raise RuntimeError("StepTimer.reset() during an open step")
+        if self.kind == "event" and self._pairs:
+            # Read/synchronize previous measurements before handing events out again.
+            self.times_ms()
+            self._unused.extend(ev for pair in self._pairs for ev in pair)
         self._pairs.clear()
-        self._open = None
 
     def __len__(self):
         return len(self._pairs)
