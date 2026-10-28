@@ -29,9 +29,6 @@ from models.ke1 import token_bytes_random
 from perfkit import bench
 from perfkit.schema import example_run, validate_run
 
-fixture = pytest.fixture
-parametrize = pytest.mark.parametrize
-
 ROOT = Path(__file__).resolve().parents[1]
 TINY = ROOT / "configs" / "tiny_cpu.yaml"
 VOCAB = 512
@@ -57,7 +54,7 @@ class FakeLoader:
         return token_bytes_random(self.vocab_size, max_pos)
 
 
-@fixture(autouse=True)
+@pytest.fixture(autouse=True)
 def fake_loader(monkeypatch, tmp_path):
     SEEN.clear()
     monkeypatch.setattr(bench, "Loader", FakeLoader)
@@ -226,6 +223,24 @@ def test_quick_compare_identical_runs_pass():
     assert all(r[4] == "ok" for r in rows)
 
 
+def test_quick_compare_allows_muon_implementation_variant():
+    a, b = _two_runs()
+    a["config"]["optim"]["muon_impl"] = "loop"
+    b["config"]["optim"]["muon_impl"] = "batched"
+    rows, ok, problems = bench.quick_compare(a, b, 5.0, 2)
+    assert ok and not problems
+    assert "step (clean)" in [row[0] for row in rows]
+
+
+def test_quick_compare_allows_moe_dispatch_variant():
+    a, b = _two_runs()
+    a["config"]["model"]["moe"] = {"dispatch": "loop", "num_experts": 8}
+    b["config"]["model"]["moe"] = {"dispatch": "sorted", "num_experts": 8}
+    rows, ok, problems = bench.quick_compare(a, b, 5.0, 2)
+    assert ok and not problems
+    assert "step (clean)" in [row[0] for row in rows]
+
+
 def test_quick_compare_only_gates_levels_up_to_gate_level():
     a, b = _two_runs()
     level3 = [n for n, r in a["layer"]["regions"].items() if r["level"] == 3]
@@ -284,7 +299,7 @@ def test_quick_compare_zero_ms_parts():
     assert not ok and {r[0]: r[4] for r in rows}["opt:opt.adamw"] == "FAIL"
 
 
-@parametrize("section, key, value", [("optim", "name", "adamw"), ("run", "compile", True),
+@pytest.mark.parametrize("section, key, value", [("optim", "name", "adamw"), ("run", "compile", True),
                                                  ("run", "grad_clip", 0.5), ("data", "source", "fineweb"),
                                                  ("model", "n_layer", 3)])
 def test_quick_compare_refuses_runs_that_do_different_work(section, key, value):
@@ -379,7 +394,7 @@ def _run_main(out_dir, tag, *extra):
     return bench.main(argv)
 
 
-@fixture(scope="module", params=["reversible", "plain"])
+@pytest.fixture(scope="module", params=["reversible", "plain"])
 def first_run(request, tmp_path_factory):
     """One bench run per stack, shared by the tests below (the function-scoped fake_loader cannot be used here)."""
     tmp = tmp_path_factory.mktemp(request.param)

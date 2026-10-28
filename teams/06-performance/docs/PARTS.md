@@ -30,7 +30,7 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 | Output copy + projection | `blockN.attn.proj` (3) | | memory (the copy) | a layout that needs no copy |
 | Dense MLP | `blockN.mlp` (3) | | compute | fused GELU |
 | MoE router: matmul, softmax, top-k, gates | `blockN.moe.router` (3) | | launch | one fused router kernel |
-| MoE dispatch: gather, experts, combine | `blockN.moe.dispatch` (3), `.dispatch.expertE` (3) | `model.moe.dispatch: loop → sorted+grouped` | **host syncs + launch** | sort by expert once, one grouped GEMM |
+| MoE dispatch: gather, experts, combine | `blockN.moe.dispatch` (3), `.dispatch.expertE` (3); sorted path adds `.dispatch.grouped` | `model.moe.dispatch: loop → sorted` | **host syncs + launch** | sort routes, pack them per expert, run one batched matmul per projection (one host sync for the largest group) |
 | Shared experts | `blockN.moe.shared` (3) | | compute | batch with the routed experts |
 | Residual / midpoint arithmetic | inside `blockN` (2) | | memory | fusion |
 | Final LN + LM head + cross-entropy | `head+loss` (2) | `model.ce_impl: torch → chunked → fused` | **memory (fp32 logits)** | fused linear + cross-entropy |
@@ -38,7 +38,7 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 | Reversible: invert, recompute, local backward | `bwd.invert:blockN`, `bwd.recompute:blockN`, `bwd:blockN.grad` (3) | `model.reversible` | ~2× extra forward | fuse invert + recompute, cache cheap pieces |
 | fp16 grad unscale | `opt.unscale` (2) | | small | |
 | Gradient clipping (global norm) | `opt.clip` (2) | | memory, one reduction | foreach / fused kernel |
-| Muon (Newton-Schulz per matrix) | `opt.muon` (2), `opt.muon.ns` (3) | `optim.muon_impl: loop → batched` | launch (many small matrices) | batch same-shaped matrices with `bmm` |
+| Muon (Newton-Schulz per matrix) | `opt.muon` (2), `opt.muon.ns` (3) | `optim.muon_impl: loop ↔ batched` | launch (many small matrices) | batch same-shaped matrices with `bmm`; compare against the loop reference |
 | AdamW (embedding parameters, output head, norm gains, biases) | `opt.adamw` (2) | `fused=True` | vocabulary-dependent | |
 | zero_grad, MoE bias update | `opt.zero_grad`, `opt.moe_bias` (3) | | tiny | |
 
@@ -76,8 +76,9 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 | FP8 matmuls (H100 / B200) | same regions | `run.dtype: bf16 → fp8` |
 | Time to first step | startup | launch speed check |
 
-## What the skeleton has today
+## Switches already present
 
-It has the region names for section 1. It does **not** have most of the switches yet (`attn_impl`,
-`ce_impl`, `norm_impl`, `muon_impl`, `data.loader`, `opt.muon.ns`, `opt.unscale`). Whether to add them now,
-with only `reference` implemented, is still open.
+The Muon implementation switch is `optim.muon_impl: loop | batched`. `loop` is the per-matrix reference;
+`batched` applies the same Newton–Schulz update to groups of same-shaped matrices with `torch.bmm`. The
+benchmark comparator allows only this switch to differ, so both variants can be measured in one clean commit.
+Other switches in the table remain planned work unless they are listed in the model config.

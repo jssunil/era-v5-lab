@@ -23,7 +23,6 @@ import torch
 from perfkit import metrics as M
 from perfkit import parts as P
 
-skipif = pytest.mark.skipif     # see test_ke.py: a decorator at the start of a line trips pr-guard
 
 
 # ------------------------------------------------------------------------------ slowest_parts
@@ -190,7 +189,7 @@ while True:
 """
 
 
-@skipif(os.name == "nt", reason="a shebang script stands in for nvidia-smi")
+@pytest.mark.skipif(os.name == "nt", reason="a shebang script stands in for nvidia-smi")
 def test_sampler_end_to_end_with_a_fake_nvidia_smi(tmp_path, monkeypatch):
     smi = tmp_path / "nvidia-smi"
     smi.write_text(FAKE_SMI.format(python=sys.executable))

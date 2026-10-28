@@ -36,7 +36,6 @@ from correctness.framework import PAIRS, Case, check, pair, pairs_in, rel_err, t
 from models.config import ModelConfig
 from models.gpt import GQAttention
 
-parametrize = pytest.mark.parametrize
 
 N_HEAD, N_EMBD, B, T = 8, 64, 2, 37
 WEIGHT_STD, BIAS_STD = 0.15, 0.1
@@ -132,15 +131,15 @@ def _bf16_case(device):
     return Case(ref=ref, fast=fast, inputs=[x], params_ref=params(ref_mod), params_fast=params(fast_mod))
 
 
-@parametrize("name", pairs_in(__name__))
+@pytest.mark.parametrize("name", pairs_in(__name__))
 def test_pair(name, device):
     errors = check(PAIRS[name], device)
     assert "out[0]" in errors and "grad_in[0]" in errors, f"{name}: output and input gradient must be compared"
     assert len([k for k in errors if k.startswith("grad_param")]) == 4, f"{name}: all 4 param gradients must be compared"
 
 
-@parametrize("sdpa_gqa", [True, False], ids=["sdpa_gqa", "repeat_interleave"])
-@parametrize("n_kv_head", [N_HEAD, N_HEAD // 2, N_HEAD // 4, 1])
+@pytest.mark.parametrize("sdpa_gqa", [True, False], ids=["sdpa_gqa", "repeat_interleave"])
+@pytest.mark.parametrize("n_kv_head", [N_HEAD, N_HEAD // 2, N_HEAD // 4, 1])
 def test_causal(n_kv_head, sdpa_gqa, device):
     if sdpa_gqa and n_kv_head != N_HEAD and not gpt._SDPA_GQA:
         pytest.skip("SDPA enable_gqa needs torch >= 2.5")
@@ -157,7 +156,7 @@ def test_causal(n_kv_head, sdpa_gqa, device):
     assert (y[:, cut:] - y2[:, cut:]).abs().max() > 1e-3, "the change had no effect after the cut"
 
 
-@parametrize("n_kv_head", [N_HEAD // 2, N_HEAD // 4, 1])
+@pytest.mark.parametrize("n_kv_head", [N_HEAD // 2, N_HEAD // 4, 1])
 def test_gqa_paths_agree(n_kv_head, device):
     if not gpt._SDPA_GQA:
         pytest.skip("SDPA enable_gqa needs torch >= 2.5")

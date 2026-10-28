@@ -5,6 +5,7 @@
   * adamw: torch.optim.AdamW (fused=True on CUDA).
   * muon: Muon (Keller Jordan): momentum 0.95 nesterov, update = NS5(momentum grad) * max(1, rows/cols)**0.5,
     Newton-Schulz coefficients (3.4445, -4.7750, 2.0315), 5 steps, bf16 (fp32 on GPUs without bf16: T4/P100/V100).
+    optim.muon_impl selects the per-matrix reference loop or a shape-batched torch.bmm implementation.
     Muon handles 2D block weights (including routers). AdamW handles embedding parameters
     (token table / KE projection / position table), output head, norm gains and biases. Decoupled
     weight decay applies to AdamW matrices, not 1D biases or norm gains.
@@ -14,7 +15,7 @@
   * Regions (level 2): "opt.muon", "opt.adamw"; (level 3): "opt.zero_grad".
   * flops(): Newton-Schulz FLOPs per step = sum over matrices of 5 * (4 m^2 n + 2 m^3), m <= n (for HFU).
 Cost to watch: one small matmul chain per matrix (8 experts x 2 x layers + attention + ...): likely
-launch-bound. A batched version (same-shaped matrices through bmm) is a week-2 target.
+launch-bound. `optim.muon_impl=batched` groups same-shaped matrices through bmm; `loop` remains the reference path.
 """
 from __future__ import annotations
 
@@ -58,29 +59,84 @@ def zeropower_via_newtonschulz5(G: torch.Tensor, steps: int = 5, eps: float = 1e
     return X.T if transpose else X
 
 
+def zeropower_via_newtonschulz5_batched(G: torch.Tensor, steps: int = 5,
+                                        eps: float = 1e-7) -> torch.Tensor:
+    """Apply the same Newton-Schulz iteration independently to [batch, rows, cols]."""
+    if G.ndim != 3 or G.size(0) == 0:
+        raise ValueError(f"expected a nonempty [batch, rows, cols] tensor, got {tuple(G.shape)}")
+    a, b, c = NS_COEFFS
+    X = G.to(torch.bfloat16 if (not G.is_cuda or _native_bf16()) else torch.float32)
+    transpose = X.size(1) > X.size(2)
+    if transpose:
+        X = X.transpose(1, 2)
+    norms = torch.linalg.vector_norm(X, dim=(1, 2), keepdim=True)
+    X = X / (norms + eps)
+    for _ in range(steps):
+        A = torch.bmm(X, X.transpose(1, 2))
+        B = b * A + c * torch.bmm(A, A)
+        X = a * X + torch.bmm(B, X)
+    return X.transpose(1, 2) if transpose else X
+
+
 class Muon(torch.optim.Optimizer):
-    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5, weight_decay=0.0):
+    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5,
+                 weight_decay=0.0, impl="loop"):
+        if impl not in ("loop", "batched"):
+            raise ValueError(f"Muon impl {impl!r}: loop | batched")
         super().__init__(params, dict(lr=lr, momentum=momentum, nesterov=nesterov,
-                                      ns_steps=ns_steps, weight_decay=weight_decay))
+                                      ns_steps=ns_steps, weight_decay=weight_decay, impl=impl))
+
+    @staticmethod
+    def _update_one(p, group, state):
+        if p.grad is None:
+            return
+        if "buf" not in state:
+            state["buf"] = torch.zeros_like(p.grad)
+        buf = state["buf"]
+        buf.lerp_(p.grad, 1 - group["momentum"])
+        g = p.grad.lerp(buf, group["momentum"]) if group["nesterov"] else buf
+        with region("opt.muon.ns", 3):
+            u = zeropower_via_newtonschulz5(g, group["ns_steps"])
+        if group["weight_decay"]:
+            p.mul_(1 - group["lr"] * group["weight_decay"])
+        p.add_(u.to(p.dtype), alpha=-group["lr"] * max(1.0, p.size(0) / p.size(1)) ** 0.5)
+
+    def _update_batched(self, params, group):
+        # Momentum buffers remain attached to their parameters; only the transient NS inputs are stacked.
+        grads = []
+        for p in params:
+            state = self.state[p]
+            if "buf" not in state:
+                state["buf"] = torch.zeros_like(p.grad)
+            buf = state["buf"]
+            buf.lerp_(p.grad, 1 - group["momentum"])
+            grads.append(p.grad.lerp(buf, group["momentum"]) if group["nesterov"] else buf)
+        with region("opt.muon.ns", 3):
+            updates = zeropower_via_newtonschulz5_batched(torch.stack(grads), group["ns_steps"])
+        for p, update in zip(params, updates.unbind(0)):
+            if group["weight_decay"]:
+                p.mul_(1 - group["lr"] * group["weight_decay"])
+            scale = group["lr"] * max(1.0, p.size(0) / p.size(1)) ** 0.5
+            p.add_(update.to(p.dtype), alpha=-scale)
 
     @torch.no_grad()
     def step(self, closure=None):
         for group in self.param_groups:
+            if group.get("impl", "loop") == "loop":
+                for p in group["params"]:
+                    # Match AdamW: an unused expert receives no update and its moments stay unchanged.
+                    self._update_one(p, group, self.state[p])
+                continue
+
+            # Same-shaped matrices share one batched NS chain. Group by device and dtype as
+            # well as shape so the stack operation is always valid for general callers.
+            by_shape = {}
             for p in group["params"]:
-                st = self.state[p]
-                # Match AdamW: an unused expert receives no update and its moments stay unchanged.
-                if p.grad is None:
-                    continue
-                if "buf" not in st:
-                    st["buf"] = torch.zeros_like(p.grad)
-                buf = st["buf"]
-                buf.lerp_(p.grad, 1 - group["momentum"])
-                g = p.grad.lerp(buf, group["momentum"]) if group["nesterov"] else buf
-                with region("opt.muon.ns", 3):
-                    u = zeropower_via_newtonschulz5(g, group["ns_steps"])
-                if group["weight_decay"]:
-                    p.mul_(1 - group["lr"] * group["weight_decay"])
-                p.add_(u.to(p.dtype), alpha=-group["lr"] * max(1.0, p.size(0) / p.size(1)) ** 0.5)
+                if p.grad is not None:
+                    key = (tuple(p.shape), p.device, p.dtype)
+                    by_shape.setdefault(key, []).append(p)
+            for params in by_shape.values():
+                self._update_batched(params, group)
 
 
 class MuonAdamW(torch.optim.Optimizer):
@@ -315,7 +371,8 @@ def build_optimizer(model, ocfg: dict):
         rest = [(n, p) for n, p in named_params if not use_muon(n, p)]
         named = []
         if two_d:
-            named.append(("opt.muon", Muon(two_d, lr=ocfg["muon_lr"], weight_decay=ocfg["weight_decay"])))
+            named.append(("opt.muon", Muon(two_d, lr=ocfg["muon_lr"], weight_decay=ocfg["weight_decay"],
+                                            impl=ocfg.get("muon_impl", "loop"))))
         if rest:
             named.append(("opt.adamw", adamw(rest)))
         return Optimizers(named)
