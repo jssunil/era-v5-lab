@@ -37,25 +37,32 @@ Everything is driven by config: a new model is a new YAML file in `configs/`, no
 ```
 configs/       base.yaml (every setting; plain NanoGPT on its own), lab_small.yaml, tiny_cpu.yaml
 models/        config.py, gpt.py, ke1.py, moe.py, reversible.py, optim.py
-dataio/        prepare_fineweb.py, loader.py
-perfkit/       regions.py, timer.py, bench.py, metrics.py, report.py, roofline.py, schema.py, smoke.py
-correctness/   framework.py and the test files
-results/       run JSONs, baseline_v0.md, slowest5_v0.md
-docs/          PLAN.md (interfaces, what is done and left), PARTS.md (every part we time)
+dataio/        tokenizer.py (pinned BrahmicTokenizer-131K), prepare_fineweb.py, loader.py
+perfkit/       regions.py, timer.py, bench.py, parts.py, metrics.py, report.py, schema.py, smoke.py
+correctness/   framework.py, conftest.py and the test files
+results/       README.md, baseline_v0.md, slowest5_v0.md, runs/ (run JSON + Markdown, part traces)
+docs/          PLAN.md (interfaces, what is done and left), PARTS.md (every part we time),
+               METRICS.md (MFU / HFU and system metrics, for G8)
 ```
 
 ## Status
 
 - **Done for Gate 1:** the lab model and data pipeline on the Brahmic vocabulary; the step timer, event recorders
   and bench (`perfkit/timer.py`, `perfkit/bench.py`) with clean, layer, trace, checkpoint and comm modes, a small
-  trace per slowest part and GPU system metrics; `--repeat` with each run in its own process; metrics and MFU
-  (`perfkit/metrics.py`, `docs/METRICS.md`); the correctness framework with the 1.01 drill and determinism check,
-  and test pairs for attention, KE, MoE, reversible and the whole model (fp32 and bf16, plus chunked loss).
+  trace per slowest part (`perfkit/parts.py`) and GPU system metrics; `--repeat` with each run in its own process;
+  metrics and MFU (`perfkit/metrics.py`, `docs/METRICS.md`); the report and 5% comparison (`perfkit/report.py`);
+  the correctness framework with the 1.01 drill and determinism check, and test pairs for attention, KE, MoE
+  (both dispatches), reversible, chunked loss and the whole model (fp32 and bf16); tests for the timer, bench,
+  part traces, report, optimizer and tokenizer.
+- **Added after the baseline (not yet timed on a server):** `model.moe.dispatch=sorted`, `optim.muon_impl=batched`,
+  `optim.name=polar_muon_adamw`, `--against` A/B labelling of implementation switches, and the chunked loss
+  averaging over non-ignored targets.
 - **Baseline v0 (A100-SXM4-40GB, commit `f1f4986`):** 507 ms per step, MFU 3.3%; two runs agree within 3.6% on
   every gated part ([`results/baseline_v0.md`](results/baseline_v0.md)). The five slowest parts, each with a trace
   and a week-2 idea: [`results/slowest5_v0.md`](results/slowest5_v0.md).
-- **Left:** the KE2 pair (waits for G4's decode reference), the MoE all-to-all timed on 2 GPUs (`torchrun`),
-  `perfkit/roofline.py`.
+- **Left:** the KE2 pair (waits for G4's decode reference), G5's configs (`configs/g5_*.yaml`), the MoE
+  all-to-all timed on 2 GPUs (`torchrun`), server A/B runs of the sorted dispatch and batched Muon, time and
+  token goodput.
 
 **Distributed optimizer follow-up:** the current Muon/AdamW implementation is local-process only. A DDP integration is implementable follow-up work: make parameter selection robust to the DDP `module.` prefix (or build from the unwrapped module), handle MoE experts unused on a rank, and add a multi-process correctness/smoke test. The current optimizer should not be treated as tested for DDP or ZeRO-style sharding.
 
@@ -76,13 +83,15 @@ cd era-v5-lab && git checkout g6/dev && cd teams/06-performance
 then `pip install -r perfkit/requirements.txt`. Colab (torch is already installed, do not reinstall it):
 `pip install -q tokenizers datasets pyyaml pytest`.
 
-**3. Tests** (CPU is fine, ~5 s)
+**3. Tests** (CPU is fine)
 
 ```bash
-python -m pytest correctness -q -rs              # all pass; unfinished stubs are SKIPPED and named
+python -m pytest correctness -q -rs              # all pass; skips are listed with their reason
 ```
 
-At Gate 1 no skip may be left (`-rs` lists them).
+A test that hits an unfinished stub is SKIPPED and named; at Gate 1 no stub skip may be left. Some tests skip
+for hardware reasons (CUDA only, CUDA bf16, torch >= 2.5 for GQA SDPA, not on Windows); those are expected on a
+laptop. The tokenizer tests need `tokenizer.json`: the pinned download, or `BRAHMIC_TOKENIZER_PATH` (step 4).
 
 **4. Tokenizer and data:** the tokenizer is loaded exclusively from `tokenizer.json` in the
 [source repo](https://github.com/theschoolofai/BrahmicTokenizer-131K), pinned to commit
@@ -170,10 +179,25 @@ the run JSON records the B it used, and `--against` refuses two runs with differ
 is not timed (its payload is recorded); time it under `torchrun` on 2+ GPUs (Kaggle T4 x2). A level-3 run takes
 about 8 minutes on an A100. Run the two baselines back to back in one session.
 
-Each run writes `results/runs/<tag>.json` (the format is in `docs/PLAN.md` 2.6) and prints the parts at level <= 2
-(gated) and the parts inside a block (information only). Read the `[warn]` lines: a dirty tree, the wrong vocabulary,
-recorder overhead above 2% or a throttled GPU make the numbers not count. Exit code 2 means `--against` found a part
-outside 5%.
+Each run writes `results/runs/<tag>.json` (the format is in `docs/PLAN.md` 2.6), a Markdown report next to it
+(`<tag>.md`, from `perfkit.report.render`), and with layer + trace modes one small trace per slowest part in
+`results/runs/<tag>_parts/`. It prints the parts at level <= 2 (gated) and the parts inside a block (information
+only). Read the `[warn]` lines: a dirty tree, the wrong vocabulary, recorder overhead above 2%, a gated part with
+p10..p90 spread above 10% or a throttled GPU make the numbers not count. Exit codes: 0 ok, 1 run JSON incomplete,
+2 `--against` / `--repeat` found a part outside 5%, 3 out of GPU memory, 4 no data (prepare it, or add
+`data.source=synthetic`). The checkpoint files go to `~/.cache/era-perf/ckpt/` and are deleted after; set
+`ERA_PERF_CACHE` to move the cache.
+
+Build the report files from two run JSONs (writes `<run>.md` next to the first JSON; exit code 2 on a FAIL):
+
+```bash
+python -m perfkit.report results/runs/b.json --compare results/runs/a.json --baseline /tmp/baseline.md --slowest /tmp/slowest5.md
+```
+
+The committed `results/baseline_v0.md` and `results/slowest5_v0.md` are hand-written write-ups of the two runs,
+not this command's output; do not overwrite them. `compare` refuses a pair on different GPUs, commits,
+vocabularies, dtypes, batch or sequence sizes, with a dirty tree, or with different model / optimizer / data
+config (other than `IMPL_SWITCHES`).
 
 **Colab** (Runtime → Change runtime type → GPU), one cell each so a failing step is easy to see:
 

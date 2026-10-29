@@ -3,7 +3,7 @@
 Lab setting: 1 shared expert (always on) + top-2 routed of 8 (configs/lab_small.yaml).
 
   * SparseMoE(dim, num_experts=8, top_k=2, expert_hidden=None, num_shared=0, bias_gamma=0.01,
-              dispatch="loop", name="moe")
+              dispatch="loop", name="moe", router_init_std=0.02, proj_std=0.02)
   * Attributes the fp64 test reference reads (keep these names):
       router       nn.Linear(dim, num_experts), run in fp32 (cast x to router.weight.dtype, autocast off)
       router_bias  buffer [num_experts]: steers *selection* only, never the gate weights
@@ -34,7 +34,8 @@ Lab setting: 1 shared expert (always on) + top-2 routed of 8 (configs/lab_small.
     Both paths compute token counts with a device-side compare-and-sum over topk_idx. Since sorted packs all
     expert parameters together, idle experts receive zero gradients rather than None; the loop remains default
     until the optimizer-state effect of that difference is resolved and server timings are collected.
-  * Regions (level 3): f"{name}.router", f"{name}.dispatch", f"{name}.dispatch.expert{e}", f"{name}.shared".
+  * Regions (level 3): f"{name}.router", f"{name}.dispatch", f"{name}.shared"; inside dispatch, the loop path
+    has f"{name}.dispatch.expert{e}" and the sorted path f"{name}.dispatch.grouped".
 
 Extra: "dense" dispatch (every expert on every token, exact, slow), capacity factor, aux / z loss.
 Done when: correctness/test_moe.py passes for every entry in DISPATCH.

@@ -6,9 +6,11 @@
     python -m perfkit.smoke --batch 16 model.ce_impl=chunked        # key=value overrides as in bench
 
 Prints: GPU, params, reversible reconstruction error, loss at the start and end, median step time
-with p10 / p90, tokens/s, peak memory. Precision and batch are picked from the GPU: bf16 and B=32 where
-bf16 is native (A100, L4, H100), else fp16 + GradScaler and B=8 (T4, P100, V100); run.dtype and
-run.batch_size of the config are ignored.
+with p10 / p90, tokens/s, peak memory, whether every weight is finite. Precision and batch are picked from the
+device: bf16 and B=32 where bf16 is native (A100, L4, H100), else fp16 + GradScaler and B=8 (T4, P100, V100);
+CPU runs bf16 autocast with B=8. run.device, run.dtype and run.batch_size of the config are ignored (--batch sets
+B). Every step, warmup included, is a real training step: optim.schedule / warmup_steps / min_lr_ratio are
+applied over --warmup + --steps (default 10 + 30).
 
 Not the baseline: plain wall-clock step times with one CUDA event pair, no per-part regions, no run JSON.
 Gate 1 numbers come from perfkit.bench on committed code.

@@ -1,4 +1,4 @@
-"""MFU, HFU, memory, GPU telemetry, run metadata.  [implemented; goodput and the NVML sampler are extras]
+"""MFU, HFU, memory, GPU telemetry, run metadata.  [implemented; time and token goodput still to write]
 
 The one place these numbers are computed: perfkit.bench calls it, and G8 gets the same formulas (docs/METRICS.md).
 
@@ -22,7 +22,7 @@ FLOPs per token (T = sequence length, L = layers, d = width, N_active from GPT.p
                             + optimizer FLOPs per step (Muon Newton-Schulz) / tokens per step
 MFU uses model FLOPs, HFU hardware FLOPs; both against the dense vendor peak for the dtype the run used.
 
-Extra, still to write: goodput (time and tokens, badput buckets), HBM GB/s per GPU for the roofline.
+Extra, still to write: goodput (time and tokens, badput buckets).
 """
 from __future__ import annotations
 

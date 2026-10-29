@@ -1,7 +1,9 @@
-"""Optimizers: AdamW, or Muon on every 2D weight + AdamW on the rest.  [implemented: MVP]
+"""Optimizers: AdamW; Muon on the 2D block weights + AdamW on the rest; or Polar Express MuonAdamW.  [implemented]
 
-  * build_optimizer(model, ocfg) -> object with zero_grad(), step(scaler=None), unscale(scaler), flops().
-    ocfg = cfg["optim"]: name adamw | muon | polar_muon_adamw, lr, muon_lr, weight_decay.
+  * build_optimizer(model, ocfg) -> Optimizers: zero_grad(), step(scaler=None), unscale(scaler), flops(),
+    set_lr(step, total_steps, schedule, warmup_steps, min_lr_ratio), state_dict(), load_state_dict(), and
+    .named = [(region name, torch optimizer)] (bench saves every one in checkpoint mode).
+    ocfg = cfg["optim"]: name adamw | muon | polar_muon_adamw, muon_impl, lr, muon_lr, weight_decay.
   * adamw: torch.optim.AdamW (fused=True on CUDA).
   * muon: Muon (Keller Jordan): momentum 0.95 nesterov, update = NS5(momentum grad) * max(1, rows/cols)**0.5,
     Newton-Schulz coefficients (3.4445, -4.7750, 2.0315), 5 steps, bf16 (fp32 on GPUs without bf16: T4/P100/V100).
@@ -12,7 +14,8 @@
     A parameter with grad=None is skipped, matching AdamW's unused-expert behavior.
   * polar_muon_adamw: one torch optimizer combines AdamW with Polar Express Muon, row equilibration,
     norm correction, factored variance reduction and cautious weight decay (single-process implementation).
-  * Regions (level 2): "opt.muon", "opt.adamw"; (level 3): "opt.zero_grad".
+  * Regions (level 2): "opt.muon", "opt.adamw", or "opt.polar_muon_adamw" with "opt.muon" / "opt.adamw" inside;
+    (level 3): "opt.muon.ns" (once per matrix, or per shape group with muon_impl=batched), "opt.zero_grad".
   * flops(): Newton-Schulz FLOPs per step = sum over matrices of 5 * (4 m^2 n + 2 m^3), m <= n (for HFU).
 Cost to watch: one small matmul chain per matrix (8 experts x 2 x layers + attention + ...): likely
 launch-bound. `optim.muon_impl=batched` groups same-shaped matrices through bmm; `loop` remains the reference path.

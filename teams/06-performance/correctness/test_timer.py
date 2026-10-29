@@ -15,6 +15,9 @@ reviewed and merged since). It had no test of its own. This file adds the two pr
      stats() must return the right numbers for a known list.
   3. (CUDA only, skipped without a GPU) Deferred sync: no host sync happens while regions are recorded; the
      events are read once, afterwards.
+  4. StepTimer and EventPool bookkeeping: expected_steps validation, CUDA events made before the steps (and
+     an error when they run out), reset() refuses an open step and syncs before reusing events on CUDA, and the
+     created-events counter stays cumulative across resets.
 
 Everything except the CUDA test runs on the CPU, where perf_counter is exact.
 """

@@ -28,7 +28,10 @@ HFU                = tokens_per_s * hw_flops_per_token / 1e12 / peak_tflops
 ```
 
 MFU uses model FLOPs; HFU uses hardware FLOPs. Both divide by the **dense** vendor peak for the
-dtype the run used (`peak_tflops` in the run JSON).
+dtype the run used (`peak_tflops` in the run JSON). The run JSON `metrics` section stores `mfu`, `hfu`,
+`model_tflops_per_s`, `model_flops_per_token`, `hw_flops_per_token`, `params_total` and `params_active`;
+`mfu` and `hfu` are `null` when there is no peak. The optimizer FLOPs come from `Optimizers.flops()` in
+`models/optim.py`.
 
 ## Peak table (`PEAKS` in `metrics.py`)
 
@@ -36,8 +39,9 @@ dtype the run used (`peak_tflops` in the run JSON).
 H100, A100, L40S, …). First match wins, so specific names come first.
 
 - Known GPU, known dtype peak → `peak_tflops` is set; MFU/HFU can be computed.
-- Known GPU, empty peak entry, or unknown GPU → peak is missing; **leave MFU empty** and say so
-  in the run (or pass `--peak-tflops` on the bench CLI).
+- Known GPU, empty peak entry (today `H100 NVL`, `A10G`), a dtype with no entry (bf16 on V100 / T4 / P100,
+  where bench falls back to fp16 anyway), or unknown GPU → peak is missing; **leave MFU empty**. The bench
+  adds a run warning; pass `--peak-tflops` on the bench CLI to set it.
 
 ## Tokens per second
 
@@ -47,8 +51,10 @@ Report and G8 must use the value already stored in the run JSON, not recompute a
 ## Dirty commit
 
 `meta.dirty` is true when the working tree under `teams/06-performance` (outside `results/`)
-differs from `meta.commit`. A dirty run is not a named commit: treat baselines from dirty trees
-as non-authoritative until the tree is clean.
+differs from `meta.commit`, new files included. A dirty run is not a named commit: treat baselines from dirty
+trees as non-authoritative until the tree is clean. `perfkit.report.compare` refuses a pair unless both runs
+have `dirty: false` and the same commit. `dirty` is `null` when git status cannot run; with no `.git`
+at all, `meta.commit` is taken from the `PERF_COMMIT` environment variable (or `null`).
 
 ## System metrics (`run["system"]`, CUDA runs)
 
@@ -67,6 +73,17 @@ as non-authoritative until the tree is clean.
 `slowdown_samples` / `slowdown_reasons`: samples in which the driver reported a power cap, thermal or hardware
 slowdown (`SLOWDOWN` in `metrics.py`; idle and application clocks are not slowdowns). Any slowdown sample adds
 a run warning: such a run may miss the 5% check. Off CUDA, or without `nvidia-smi`, there is no `system` section.
+
+Besides the sampler, `meta.telemetry_start` and `meta.telemetry` (`after_warmup`, `during_steps`, `end`) hold
+single `nvidia-smi` readings (`gpu_telemetry`). The `during_steps` reading is taken while three untimed steps run.
+From those, bench warns at 83 C or above, when the driver reports a slowdown, or (when it reports no reasons)
+when the SM clock is below 85% of `clocks.max.sm`.
+
+## Goodput (partial)
+
+`run["goodput"]["badput_s"]` has the wall-clock seconds of `startup` (model, loader, optimizer built),
+`first_step` (includes `torch.compile` / autotune when on) and `warmup`. Time goodput and token goodput are
+not written yet.
 
 ## Shared run JSON
 

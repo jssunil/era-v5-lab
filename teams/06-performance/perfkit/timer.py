@@ -9,7 +9,7 @@ after the step. Nothing in this file synchronizes inside a timed step.
   StepTimer(device)                  one event pair per step: start() / stop(); times_ms() syncs once
   stats(xs)                          median, p10, p90, iqr, min, max, n, spread_pct (the numbers we gate on),
                                      plus mean and std for information (Task 2 of G6_Team_Task_Plan.md).
-  Buckets(device)                    wall-clock seconds per named bucket (startup, compile, checkpoint)
+  Buckets(device)                    wall-clock seconds per named bucket (bench: startup, first_step, warmup)
   EventPool()                        reusable CUDA events, so a timed step allocates none
   EventRecorder(device, max_level)   layer mode: the recorder protocol of perfkit/regions.py
   ProfilerRecorder(max_level)        trace mode: record_function + NVTX ranges with the same names
@@ -184,7 +184,8 @@ class StepTimer:
 
 
 class Buckets:
-    """Wall-clock seconds per named bucket, for goodput / badput: startup, compile, eval, checkpoint.
+    """Wall-clock seconds per named bucket, for goodput / badput. bench uses startup, first_step and warmup
+    (run["goodput"]["badput_s"]); eval and checkpoint buckets are planned.
 
         b = Buckets(device)
         with b("startup"):  build()

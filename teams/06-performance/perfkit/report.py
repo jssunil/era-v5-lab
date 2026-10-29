@@ -1,21 +1,25 @@
 """Run JSON -> Markdown, two-run comparison, baseline and slowest-parts files.
 
-Build it against perfkit.schema.example_run(); no need to wait for bench.
+bench writes <tag>.md with render() after every run, and uses compare_lines() / ab_note() for --against.
 
-    python -m perfkit.report results/runs/<tag>.json
-    python -m perfkit.report run1.json --compare run2.json --baseline results/baseline_v0.md --slowest results/slowest5_v0.md
+    python -m perfkit.report results/runs/<tag>.json                       # rewrites <tag>.md
+    python -m perfkit.report b.json --compare a.json --baseline out.md --slowest out5.md   # exit 2 on FAIL
 
-MVP
-  * render(run) -> Markdown: header (GPU, dtype, B x T, torch, commit), step stats, MFU, per-region table
-    (ms, p90, % of step, level), "time by part type" (sum over layers), five slowest leaf parts.
-  * compare(a, b, tol_pct=5, gate_level=2) -> (rows, ok, problems): the whole step plus every region with
-    level <= gate_level must be within tol_pct. NO exemption for small parts. Refuse runs on different
-    GPUs or with different configs. Level-3 rows are listed as information only. Runs that differ only in
-    an IMPL_SWITCHES entry are compared and labelled A/B (ab_note).
-  * baseline_md(...): GPU name, commit, config, PASS/FAIL, the comparison table.
-  * slowest_md(run): five slowest parts, each: ms and % of step, why (bound + evidence), trace reference,
-    one week-2 idea.
-Extra: roofline predictions (perfkit/roofline.py), per-part trace files cut from the full trace.
+The committed results/baseline_v0.md and slowest5_v0.md are hand-written from such output; do not overwrite them.
+
+  * render(run) -> Markdown: header (GPU, dtype, B x T, torch, commit), step stats, MFU, diagnostics (CUDA
+    timing-event allocations, the run's warnings), per-region table (ms, p90, % of step, level),
+    "time by part type" (sum over layers), five slowest leaf parts.
+  * compare(a, b, tol_pct=5, gate_level=2) -> (rows, ok, problems): the whole step, every region with
+    level <= gate_level, checkpoint save (both runs) and the measured MoE all-to-all (both runs) must be
+    within tol_pct. Diff = slower / faster - 1. NO exemption for small parts. Refuses (problems) runs on
+    different GPUs, commits, vocabularies, dtypes, B or T, a dirty tree, or a different COMPARE_CONFIG.
+    Level-3 rows are listed as information only. Runs that differ only in an IMPL_SWITCHES entry are compared
+    and labelled A/B (ab_note).
+  * baseline_md(...): GPU name, commits, config, PASS / FAIL / A/B / REFUSED, the comparison table.
+  * slowest_md(run): five slowest leaf parts, each with ms, % of step and the trace file; the "why" and the
+    week-2 idea are placeholders to fill in by hand.
+Per-part trace files are cut from the full trace by perfkit/parts.py (bench, trace mode).
 """
 from __future__ import annotations
 

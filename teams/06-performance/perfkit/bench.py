@@ -45,7 +45,7 @@ What a run does (the numbered steps of the original stub)
      parts inside a block from a level-3 pass, so the many level-3 events cannot slow the gated
      numbers. Each region keeps its level ("pass" says which pass measured it).
   7. Metrics from perfkit.metrics (the one place MFU / HFU are computed), run JSON to
-     <bench.out_dir>/<tag>.json, Markdown from perfkit.report.render when written.
+     <bench.out_dir>/<tag>.json, Markdown next to it (<tag>.md, perfkit.report.render).
      perfkit.schema.validate_run must return [] (exit code 1 otherwise).
 
 Modes (bench.modes; clean always runs: meta, config, clean and metrics are required)

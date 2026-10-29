@@ -4,7 +4,8 @@
     repo root (the Gate 1 command) as well as from teams/06-performance.
   * `device` fixture: cuda if available, else cpu.
   * A test that hits a stub (NotImplementedError) is reported as SKIPPED with the stub's name, not failed.
-    `pytest -rs` lists them. At Gate 1 no skip may be left.
+    `pytest -rs` lists them. At Gate 1 no stub skip may be left (skips for missing CUDA / bf16 are expected
+    on a laptop).
   * At the end of the run: one row per pair, grouped by area: the worst output and gradient error, how much
     of the tolerance it uses, whether two runs were bit-identical, and PASS/FAIL with the first failure line.
 """

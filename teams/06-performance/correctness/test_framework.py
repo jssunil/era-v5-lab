@@ -10,6 +10,8 @@ Checks, for EVERY registered pair:
   * check on model-like cases: two outputs through a backward that may run only once (the reversible stack),
     a parameter with no gradient on both sides (an MoE expert with no tokens), a detached fast output fails
   * tolerances: fp32 defaults from TOLERANCES, fp32 >= 1e-2 refused, bf16 pairs are kept out of the drill
+  * output structure: tuples, lists, None, nested containers and Python floats / metadata in the outputs must
+    match between ref and fast (type, length, values), and a wrong tensor nested inside still fails
 """
 from __future__ import annotations
 

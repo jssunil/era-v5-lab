@@ -1,6 +1,6 @@
 """Model config and YAML loading.  [CONTRACT]
 
-Changing a field name or meaning changes a shared interface: bench, roofline, report and tests read these.
+Changing a field name or meaning changes a shared interface: bench, report and tests read these.
 
 Rule: no number about the model is hard-coded anywhere else. Everything reads ModelConfig.
 G5's configs become new configs/g5_*.yaml files. If they need a field we do not have,

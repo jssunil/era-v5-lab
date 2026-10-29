@@ -14,6 +14,12 @@ constructor and attributes as dataio.loader.Loader.
   * write_run / _finite: unique file names, NaN and inf become null.
   * main, for the reversible and the plain stack: clean + layer + checkpoint run, validate_run returns [],
     the parts are there and add up, exit codes 0 and 2.
+  * quick_compare also accepts an A/B of optim.muon_impl or model.moe.dispatch, and gates checkpoint save and
+    the all-to-all when both runs have them.
+  * throttle warnings: an idle GPU is not flagged; slowdown reasons are named; the SM clock is the fallback.
+  * --repeat: every run in a child process, one JSON per run, PASS / exit 2, a killed run stops the repeat.
+  * trace: kernels counted (not annotations); with layer mode, one small trace per slowest part.
+  * CUDA timing-event counters (clean, layer and its inner pass, comm) in the JSON, and their warnings.
 """
 from __future__ import annotations
 

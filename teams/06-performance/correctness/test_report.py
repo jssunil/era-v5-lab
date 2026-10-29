@@ -1,4 +1,10 @@
-"""perfkit/report.py: compare() refuses a baseline pair that does not time the same committed code."""
+"""perfkit/report.py.
+
+  * compare(): refuses a baseline pair that does not time the same committed code (other commit, dirty or unknown
+    tree) or that changes a MoE setting other than dispatch; accepts and labels A/B a pair that differs only in
+    optim.muon_impl or model.moe.dispatch.
+  * render(): the CUDA timing-event allocation diagnostics per stage and the run's warnings, word for word.
+"""
 from __future__ import annotations
 
 import copy
