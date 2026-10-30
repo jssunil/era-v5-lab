@@ -1,0 +1,20 @@
+# The config of results/baseline_v0.md (Colab A100-40GB, commit f1f4986, 27 Oct): the lab model at B=32, T=512,
+# KE v1 input, GQA 8/2 heads, pre-LN inside the reversible f, 1 shared + top-2 of 8 MoE, reversible midpoint stack
+# (h = 1), 9 layers, loop Muon + AdamW, 150 measured steps. Kept so that baseline_v0.md and slowest5_v0.md can be
+# reproduced after configs/base.yaml became the default config: base.yaml now sets its own (smaller) model, and every
+# value below is the one base.yaml had at f1f4986. Data: FineWeb sample-10BT retokenized with BrahmicTokenizer-131K.
+#   python -m perfkit.bench --config configs/lab_small.yaml --level 3 --repeat 2 --tag baseline_v0
+inherit: base.yaml
+run: {seed: 0, batch_size: 32}
+model:
+  block_size: 512
+  n_layer: 9
+  attn_impl: sdpa
+  n_kv_head: 2
+  embedding: ke1
+  ffn: moe
+  moe: {num_experts: 8, top_k: 2, num_shared: 1, bias_gamma: 0.01, dispatch: loop}
+  reversible: true
+  mtp: false
+optim: {name: muon, muon_impl: loop}
+bench: {steps: 150, level: 3}

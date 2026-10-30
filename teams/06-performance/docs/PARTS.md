@@ -50,7 +50,7 @@ Levels: 1 = phases, 2 = per layer and big parts (gated at 5%), 3 = inside a laye
 | Warmup steps | `goodput.badput_s.warmup` | allocator and autotune settle |
 | Logging (`.item()`) | `goodput.badput.logging` (planned) | each call is a host sync |
 | Eval | `goodput.badput.eval` (planned) | not training time |
-| Checkpoint save (later load / resume) | `checkpoint` mode: `save_ms` (= `to_cpu_ms` + `write_ms`), `size_mb` | blocks training; later async or sharded |
+| Checkpoint save (later load / resume) | `checkpoint` mode: `save_ms` (= `to_cpu_ms` + `write_ms`), `size_mb`; the 5% check gates `to_cpu_ms`, `write_ms` (disk, fsync) is information only | blocks training; later async or sharded |
 | Tokenizer throughput | `tokenizer` mode (planned; not in `bench.MODES` yet) | offline, but feeds the data pipeline (G3's tokenizer later) |
 
 ## 3. Measured, but not regions

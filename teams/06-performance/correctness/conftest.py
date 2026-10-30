@@ -3,9 +3,8 @@
   * Puts teams/06-performance on sys.path, so `pytest teams/06-performance/correctness` works from the
     repo root (the Gate 1 command) as well as from teams/06-performance.
   * `device` fixture: cuda if available, else cpu.
-  * A test that hits a stub (NotImplementedError) is reported as SKIPPED with the stub's name, not failed.
-    `pytest -rs` lists them. At Gate 1 no stub skip may be left (skips for missing CUDA / bf16 are expected
-    on a laptop).
+  * A test that hits a stub (NotImplementedError) fails like any other error: a stub is never reported as a skip.
+    Skips that remain are for a missing CUDA / bf16 or another operating system (`pytest -rs` lists them).
   * Only what configs/base.yaml uses runs by default. A test of a feature base.yaml does not select (MoE when
     model.ffn is mlp, KE1 when model.embedding is ke2, SDPA when model.attn_impl is eager, ...) is DESELECTED:
     it does not run and is not listed, and its 1.01 drill goes with it. `pytest correctness --all-configs` runs every test (Gate 1:
@@ -172,10 +171,7 @@ FAILED_PAIRS: dict = {}              # pair name -> first line of its failure (f
 def pytest_runtest_makereport(item, call):
     outcome = yield
     rep = outcome.get_result()
-    if call.excinfo is not None and call.excinfo.errisinstance(NotImplementedError):
-        rep.outcome = "skipped"
-        rep.longrepr = (str(item.path), item.location[1] or 0, f"stub: {call.excinfo.value}")
-    elif rep.failed and call.excinfo is not None:
+    if rep.failed and call.excinfo is not None:
         name = getattr(item, "callspec", None) and item.callspec.params.get("name")
         if isinstance(name, str):
             first = str(call.excinfo.value).strip().splitlines()[0] if str(call.excinfo.value).strip() else ""

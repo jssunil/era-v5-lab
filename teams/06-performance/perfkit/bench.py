@@ -111,7 +111,7 @@ from perfkit import metrics as M  # noqa: E402
 from perfkit import parts as P  # noqa: E402
 from perfkit import timer as T  # noqa: E402
 from perfkit.regions import phase, point, region, use_recorder  # noqa: E402
-from perfkit.report import PASSED, ab_note, compare_config_value, compare_lines, gate  # noqa: E402
+from perfkit.report import PASSED, ab_note, checkpoint_rows, compare_config_value, compare_lines, gate  # noqa: E402
 from perfkit.schema import validate_run  # noqa: E402
 
 BENCH_VERSION = 1
@@ -649,7 +649,8 @@ def summary(run: dict, gate_level: int) -> str:
 
 def quick_compare(a: dict, b: dict, tol_pct: float, gate_level: int, abs_tol_ms: float) -> tuple:
     """This run (a) against an earlier one (b): the whole step and every part at level <= gate_level in
-    either run, plus checkpoint save and all-to-all when both runs have them. diff = slower / faster - 1;
+    either run, plus the checkpoint copy GPU -> CPU and all-to-all when both runs have them (the checkpoint disk write is
+    listed as information only). diff = slower / faster - 1;
     a part passes within tol_pct or less than abs_tol_ms apart (perfkit.report.gate).
     Refused (problems) when the GPU, dtype, shapes or COMPARE_CONFIG differ. A part only one run has is
     MISSING. A quick look on the console; the official check is perfkit.report.compare."""
@@ -669,8 +670,8 @@ def quick_compare(a: dict, b: dict, tol_pct: float, gate_level: int, abs_tol_ms:
     gated += [n for n, r in rb.items() if r["level"] <= gate_level and n not in ra]     # a part only b has
     for name in gated:
         pairs.append((name, ra[name]["median"] if name in ra else None, rb[name]["median"] if name in rb else None))
-    if a.get("checkpoint") and b.get("checkpoint"):
-        pairs.append(("checkpoint save", a["checkpoint"]["save_ms"]["median"], b["checkpoint"]["save_ms"]["median"]))
+    ckpt_gated, ckpt_info = checkpoint_rows(a, b)
+    pairs += ckpt_gated
     ca, cb = (a.get("comm") or {}).get("moe_a2a") or {}, (b.get("comm") or {}).get("moe_a2a") or {}
     if ca.get("measured") and cb.get("measured"):
         pairs.append(("moe all-to-all", ca["per_step_ms"], cb["per_step_ms"]))
@@ -683,6 +684,7 @@ def quick_compare(a: dict, b: dict, tol_pct: float, gate_level: int, abs_tol_ms:
         diff, verdict = gate(x, y, tol_pct, abs_tol_ms)
         ok &= verdict in PASSED
         rows.append((name, x, y, diff, verdict))
+    rows += [(name, x, y, gate(x, y, tol_pct, abs_tol_ms)[0], "info") for name, x, y in ckpt_info]
     return rows, ok, problems
 
 
@@ -905,13 +907,10 @@ def run_once(a, overrides):
     print(summary(run, gate_level))
     path = write_run(run, out_dir, tag, path)
     print(f"\n[bench] run JSON -> {_show(path)}")
-    try:
-        from perfkit import report
-        md = path.with_suffix(".md")
-        md.write_text(report.render(run))
-        print(f"[bench] report   -> {_show(md)}")
-    except NotImplementedError:
-        print("[bench] perfkit.report.render is still a stub: no .md written")
+    from perfkit import report
+    md = path.with_suffix(".md")
+    md.write_text(report.render(run))
+    print(f"[bench] report   -> {_show(md)}")
     for w in warns:
         print(f"[warn] {w}")
     for p in problems:
@@ -1041,7 +1040,7 @@ def rule_checks(run: dict, modes: list, cfg: dict) -> list:
                    f"this run used model.vocab_size={me['vocab_size']}")
     if "layer" in modes and cfg["bench"]["level"] < 3:
         out.append("rule 3a: parts inside a block were not timed; add --level 3 (reported, not gated)")
-    wanted = ("checkpoint", "comm") if cfg.get("model", {}).get("ffn") == "moe" else ("checkpoint",)
+    wanted = ("checkpoint", "comm") if cfg["model"]["ffn"] == "moe" else ("checkpoint",)
     missing = [m for m in wanted if m not in modes]          # comm = the MoE all-to-all: dense models have none
     if missing:
         out.append(f"rule 3b: {' and '.join(missing)} not measured; add {','.join(missing)} to --modes")

@@ -4,10 +4,15 @@
     tree) or that changes a MoE setting other than dispatch; accepts and labels A/B a pair that differs only in
     optim.muon_impl or model.moe.dispatch.
   * render(): the CUDA timing-event allocation diagnostics per stage and the run's warnings, word for word.
+  * compare() applies the 5% / abs_tol_ms rule (report.gate); the checkpoint copy GPU -> CPU is gated, the disk
+    write is information only; report.report_settings() fills in keys an older run JSON lacks.
 """
 from __future__ import annotations
 
 import copy
+import json
+
+import pytest
 
 from perfkit import report
 from perfkit.schema import example_run
@@ -104,3 +109,63 @@ def test_render_flags_inner_pool_allocation_when_timer_count_is_zero():
     assert "[OK] layer: events_created_during_steps=0" in md
     assert "[WARN] layer.inner_pass.recorder_pool: events_created_while_measuring=57" in md
     assert "[warn] 57 recorder-pool CUDA events" in md
+
+
+def _with_part(run, name, ms):
+    run["layer"]["regions"][name] = dict(next(iter(run["layer"]["regions"].values())), median=ms, level=1)
+    return run
+
+
+@pytest.mark.parametrize("x, y, abs_tol, verdict", [
+    (0.031, 0.035, 0.05, "ok_abs"),        # 12.9% apart but 0.004 ms
+    (0.031, 0.035, 0.0, "FAIL"),           # no floor: the 5% rule alone
+    (20.0, 20.9, 0.05, "ok"),              # 4.5%
+    (20.0, 21.2, 0.05, "FAIL"),            # 6%
+    (1.0, 1.06, 0.05, "FAIL"),             # 6% and 0.06 ms: just over the floor
+    (0.569, 0.031, 0.05, "FAIL"),
+])
+def test_compare_applies_the_5_percent_or_abs_tol_rule(x, y, abs_tol, verdict):
+    a, b = _pair()
+    _with_part(a, "data", x)
+    _with_part(b, "data", y)
+    rows, ok, _ = report.compare(a, b, 5.0, 2, abs_tol)
+    row = next(r for r in rows if r[0] == "data")
+    assert row[1:3] == (x, y) and row[4] == verdict
+    assert ok == (verdict != "FAIL")
+
+
+def test_compare_checkpoint_copy_is_gated_and_disk_write_is_information_only():
+    a, b = _pair()
+    mk = lambda copy_ms, write_ms: {"save_ms": {"median": copy_ms + write_ms}, "to_cpu_ms": {"median": copy_ms},
+                                    "write_ms": {"median": write_ms}}
+    a["checkpoint"], b["checkpoint"] = mk(37.0, 300.0), mk(37.0, 450.0)
+    rows, ok, _ = report.compare(a, b, 5.0, 2, 0.05)
+    verdict = {r[0]: r[4] for r in rows}
+    assert ok and verdict[report.CKPT_COPY] == "ok" and verdict[report.CKPT_WRITE] == "info"
+    b["checkpoint"] = mk(60.0, 300.0)                                   # the copy moved 62%: that does fail
+    rows, ok, _ = report.compare(a, b, 5.0, 2, 0.05)
+    assert not ok and {r[0]: r[4] for r in rows}[report.CKPT_COPY] == "FAIL"
+
+
+def test_compare_lines_report_both_times_for_parts_that_pass_on_the_floor():
+    a, b = _pair()
+    _with_part(a, "data", 0.031)
+    _with_part(b, "data", 0.035)
+    rows, ok, problems = report.compare(a, b, 5.0, 2, 0.05)
+    text = "\n".join(report.compare_lines(rows, ok, problems, None, 5.0, 2, 0.05))
+    assert "0.031" in text and "0.035" in text and "0.004" in text and "ok (< 0.05 ms)" in text
+    assert "(1 by the 0.05 ms rule)" in text
+
+
+def test_report_cli_works_on_a_run_json_written_before_abs_tol_ms(tmp_path, capsys):
+    """Run JSONs from before the 0.05 ms rule have no report.abs_tol_ms; report --compare must still work."""
+    a = example_run()
+    del a["config"]["report"]["abs_tol_ms"], a["config"]["report"]["min_compare_steps"]
+    b = copy.deepcopy(a)
+    b["meta"]["tag"] = "b"
+    pa, pb = tmp_path / "a.json", tmp_path / "b.json"
+    pa.write_text(json.dumps(a))
+    pb.write_text(json.dumps(b))
+    assert report.report_settings(a)["abs_tol_ms"] == 0.05
+    assert report.main([str(pa), "--compare", str(pb)]) == 0
+    assert "PASS" in capsys.readouterr().out

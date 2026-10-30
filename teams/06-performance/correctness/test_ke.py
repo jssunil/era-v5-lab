@@ -235,15 +235,5 @@ def test_constructor_guards():
         KroneckerEmbedding((tb[:, :16], lens), D_MODEL, P, "dynamic")   # table is [V, 16], max_pos says 32
 
 
-# ------------------------------------------------------------------------------ a contract gap, recorded
-
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason=(
-    "models/ke1.py says L is 'the number of bytes (truncated to P)', but kronecker_codec uses the raw lens in "
-    "1/sqrt(L) when lens > P (it differs by about 2e-4 for L = 40, P = 32). The tokenizer refuses tokens longer "
-    "than ke_max_pos, so real runs never reach this; fix the code or the docstring, then remove this xfail."))
-def test_a_token_longer_than_P_is_normalised_with_L_truncated_to_P():
-    tb = torch.randint(0, 256, (1, P), dtype=torch.uint8)
-    lens = torch.tensor([40])
-    got = kronecker_codec(tb, lens, P)[0].double()
-    ref = reference_codec(tb, lens, torch.tensor([0]))[0]       # the docstring definition: L = min(40, 32)
-    assert (got - ref).abs().max() < 1e-6
+# A token longer than P bytes never reaches the codec: BrahmicTokenizer.token_bytes refuses it
+# (test_tokenizer.py, match="byte positions"), so L <= P and the models/ke1.py definition holds.

@@ -358,14 +358,31 @@ def test_quick_compare_refuses_runs_that_do_different_work(section, key, value):
     assert not ok and any(section in p for p in problems)
 
 
-def test_quick_compare_includes_checkpoint_and_all_to_all_when_both_have_them():
+def _ckpt(copy_ms, write_ms):
+    return {"save_ms": {"median": copy_ms + write_ms}, "to_cpu_ms": {"median": copy_ms},
+            "write_ms": {"median": write_ms}}
+
+
+def test_quick_compare_includes_checkpoint_copy_and_all_to_all_when_both_have_them():
     a, b = _two_runs()
     for r, ms in ((a, 100.0), (b, 130.0)):
-        r["checkpoint"] = {"save_ms": {"median": ms}}
+        r["checkpoint"] = _ckpt(ms, 300.0)
         r["comm"] = {"moe_a2a": {"measured": True, "per_step_ms": ms / 10}}
     rows, ok, _ = bench.quick_compare(a, b, 5.0, 2, 0.0)
     verdict = {r[0]: r[4] for r in rows}
-    assert verdict["checkpoint save"] == "FAIL" and verdict["moe all-to-all"] == "FAIL" and not ok
+    assert verdict["checkpoint copy (GPU to CPU)"] == "FAIL" and verdict["moe all-to-all"] == "FAIL" and not ok
+
+
+def test_quick_compare_checkpoint_disk_write_is_information_only():
+    """The fsync write measures the disk: 50% apart there must not fail a pair whose copy and parts agree."""
+    a, b = _two_runs()
+    a["checkpoint"], b["checkpoint"] = _ckpt(37.0, 300.0), _ckpt(37.0, 450.0)
+    rows, ok, problems = bench.quick_compare(a, b, 5.0, 2, 0.05)
+    verdict = {r[0]: r[4] for r in rows}
+    assert ok and not problems
+    assert verdict["checkpoint copy (GPU to CPU)"] == "ok"
+    assert verdict["checkpoint write (disk, information only)"] == "info"
+    assert not any("checkpoint save" in r[0] for r in rows)
 
 
 # ------------------------------------------------------------------------------ checkpoint

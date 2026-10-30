@@ -35,7 +35,8 @@ Everything is driven by config: a new model is a new YAML file in `configs/`, no
 ## Folder layout
 
 ```
-configs/       base.yaml (every setting; the default config of bench, smoke and test_model.py), tiny_cpu.yaml
+configs/       base.yaml (every setting; the default config of bench, smoke and test_model.py), tiny_cpu.yaml,
+               lab_small.yaml (only the config of results/baseline_v0.md, kept so that baseline can be reproduced)
 models/        config.py, gpt.py, ke1.py, moe.py, reversible.py, optim.py
 dataio/        tokenizer.py (pinned BrahmicTokenizer-131K), prepare_fineweb.py, loader.py
 perfkit/       regions.py, timer.py, bench.py, parts.py, metrics.py, report.py, schema.py, smoke.py
@@ -201,13 +202,15 @@ Read the clean step median, tokens/s, and the level-3 `blockN.moe.dispatch` or `
 
 **The 5% rule (agreed with TSAI, 30 Oct; other teams use the same check).** Two runs of the same code, GPU and
 config are compared part by part: the whole step, the step parts and whole blocks (level <= `report.gate_level`),
-checkpoint save and the measured all-to-all. A part passes when the two runs are **within 5%**
+the checkpoint copy GPU -> CPU and the measured all-to-all. A part passes when the two runs are **within 5%**
 (`report.tol_pct`; gap = slower / faster - 1) **or differ by less than 0.05 ms** (`report.abs_tol_ms`). The 0.05 ms
 floor is there because a very small part (for example `data` at 0.03 ms) can be 10% apart on timer noise alone,
 a few microseconds that the GPU timer cannot resolve. Both run times and their difference in ms are reported for
 every part, also for the parts that pass on the 0.05 ms rule (marked `ok (< 0.05 ms)`). Each part is the median
 over `bench.steps` measured steps; compare runs of at least `report.min_compare_steps` (100) steps, so that small
-parts are the median of many calls (bench warns below that).
+parts are the median of many calls (bench warns below that). The checkpoint disk write (serialise + write + fsync,
+`checkpoint.write_ms`) is reported with its MB/s but not gated: it measures the disk of the machine, and it moved
+5 to 10% between two runs of the same code on every machine we tried (A100 and H100 on Modal, RTX 5070 Ti).
 
 The 5% rule itself is two runs of one implementation. Before switching a default, each side must pass it:
 

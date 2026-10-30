@@ -6,7 +6,7 @@ Same maths, same defaults; only the constructor takes our byte-table tuple inste
 
 Definition:
     kappa(t) = (1/sqrt(L)) * sum_p onehot256(b_p) (x) onehot_P(p)        D = 256 * P (P = 32: 8192)
-    index of byte b at slot p = b * P + p;  L = number of bytes (truncated to P)
+    index of byte b at slot p = b * P + p;  L = number of bytes (a token longer than P is refused by the tokenizer, so L <= P)
     kappa is then z-normalised per token: (kappa - mean) / (std + 1e-6)  (std with Bessel correction)
     embedding(t) = W @ kappa(t),  W learned [d_model, D], no bias, init normal(0, 1/sqrt(D)).
     The codec itself is fixed (no parameters).

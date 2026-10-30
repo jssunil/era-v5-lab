@@ -11,11 +11,12 @@ The committed results/baseline_v0.md and slowest5_v0.md are hand-written from su
     timing-event allocations, the run's warnings), per-region table (ms, p90, % of step, level),
     "time by part type" (sum over layers), five slowest leaf parts.
   * compare(a, b, tol_pct, gate_level, abs_tol_ms) -> (rows, ok, problems): the whole step, every region with
-    level <= gate_level, checkpoint save (both runs) and the measured MoE all-to-all (both runs) must pass
+    level <= gate_level, the checkpoint copy GPU -> CPU (both runs) and the measured MoE all-to-all (both runs) must pass
     gate(): within tol_pct (diff = slower / faster - 1) OR less than abs_tol_ms apart (TSAI, 30 Oct: a very
     small part can be 10% apart on timer noise alone). Both run times are reported for every part. Refuses (problems) runs on
     different GPUs, commits, vocabularies, dtypes, B or T, a dirty tree, or a different COMPARE_CONFIG.
-    Level-3 rows are listed as information only. Runs that differ only in an IMPL_SWITCHES entry are compared
+    Level-3 rows and the checkpoint disk write (fsync; it moves 5-10% between runs on any machine) are listed as
+    information only. Runs that differ only in an IMPL_SWITCHES entry are compared
     and labelled A/B (ab_note).
   * baseline_md(...): GPU name, commits, config, PASS / FAIL / A/B / REFUSED, the comparison table.
   * slowest_md(run): five slowest leaf parts, each with ms, % of step and the trace file; the "why" and the
@@ -102,6 +103,20 @@ def gate(x: float, y: float, tol_pct: float, abs_tol_ms: float) -> tuple:
 
 PASSED = ("ok", "ok_abs")
 
+CKPT_COPY = "checkpoint copy (GPU to CPU)"
+CKPT_WRITE = "checkpoint write (disk, information only)"
+
+
+def checkpoint_rows(a: dict, b: dict) -> tuple:
+    """([(name, x, y)] gated, [(name, x, y)] information only) for the checkpoint of two runs, empty when either run
+    has none. Gated: the GPU -> CPU copy, which is stable. Information only: serialise + write + fsync, which measures
+    the disk of the machine the run landed on (460-1560 MB/s on Modal containers, 5-10% apart between two runs)."""
+    ca, cb = a.get("checkpoint"), b.get("checkpoint")
+    if not (ca and cb):
+        return [], []
+    return ([(CKPT_COPY, ca["to_cpu_ms"]["median"], cb["to_cpu_ms"]["median"])],
+            [(CKPT_WRITE, ca["write_ms"]["median"], cb["write_ms"]["median"])])
+
 
 def _change(x, y, diff) -> str:
     """This run against the other: '12.3% faster' = 12.3% less time, '4.1% slower' = 4.1% more time.
@@ -134,7 +149,7 @@ def compare_lines(rows, ok: bool, problems: list, note: str | None, tol_pct: flo
         lines.append(f"  {name:<{w}}{_f(x):>12}{_f(y):>12}{_absdiff(x, y):>10}  {_change(x, y, diff):<16}{mark}")
     info = len(rows) - len(gated)
     if info:
-        lines.append(f"  ({info} parts inside blocks: information only, see the .md)")
+        lines.append(f"  ({info} rows are information only: parts inside blocks and the checkpoint disk write, see the .md)")
     bad = [r for r in gated if r[4] not in PASSED]
     by_abs = sum(1 for r in gated if r[4] == "ok_abs")
     if problems:
@@ -397,14 +412,8 @@ def compare(a: dict, b: dict, tol_pct: float, gate_level: int, abs_tol_ms: float
     for name in gated_names:
         pairs.append((name, ra[name]["median"] if name in ra else None, rb[name]["median"] if name in rb else None))
 
-    if a.get("checkpoint") and b.get("checkpoint"):
-        pairs.append(
-            (
-                "checkpoint save",
-                a["checkpoint"]["save_ms"]["median"],
-                b["checkpoint"]["save_ms"]["median"],
-            )
-        )
+    ckpt_gated, ckpt_info = checkpoint_rows(a, b)
+    pairs += ckpt_gated
     ca = (a.get("comm") or {}).get("moe_a2a") or {}
     cb = (b.get("comm") or {}).get("moe_a2a") or {}
     if ca.get("measured") and cb.get("measured"):
@@ -429,6 +438,8 @@ def compare(a: dict, b: dict, tol_pct: float, gate_level: int, abs_tol_ms: float
         y = rb[name]["median"] if name in rb else None
         diff = _pct_delta(x, y) if x is not None and y is not None else None
         rows.append((name, x, y, diff, "info"))
+    for name, x, y in ckpt_info:
+        rows.append((name, x, y, _pct_delta(x, y), "info"))
 
     return rows, ok, problems
 
@@ -503,6 +514,15 @@ def slowest_md(run: dict) -> str:
     return "\n".join(lines)
 
 
+def report_settings(run: dict) -> dict:
+    """The run's own report.* settings; a key an older run JSON does not have (abs_tol_ms came with the 0.05 ms rule)
+    comes from configs/base.yaml, the default config, so report --compare still works on those files."""
+    import yaml
+
+    base = yaml.safe_load((Path(__file__).resolve().parents[1] / "configs" / "base.yaml").read_text(encoding="utf-8"))
+    return {**base["report"], **((run.get("config") or {}).get("report") or {})}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Render / compare perfkit run JSON to Markdown.")
     ap.add_argument("run", help="Primary run JSON path")
@@ -516,7 +536,7 @@ def main(argv=None) -> int:
 
     run_path = Path(args.run)
     run = json.loads(run_path.read_text(encoding="utf-8"))
-    rep = run["config"]["report"]
+    rep = report_settings(run)
     for key in ("tol_pct", "gate_level", "abs_tol_ms"):
         if getattr(args, key) is None:
             setattr(args, key, rep[key])
