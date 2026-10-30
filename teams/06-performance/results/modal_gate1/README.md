@@ -1,10 +1,11 @@
-# Modal Gate 1 test logs (A100-SXM4-40GB), 30 Oct 2026
+# Modal Gate 1 test logs (A100), 30 Oct 2026
 
 Evidence for the patch on top of PR #29 (`g6/sunil-5pct-stability`, code commit `1485409`). Every folder holds the
 console log of one Modal run (`*_log.txt`), the GPU / torch report (`repeat_env.txt`) and, for a pair, the two
 generated reports (`*_normal.md`, `*_normal-run2.md`). Nothing here is hand-edited.
 
-Setup: Modal container with one A100-SXM4-40GB, torch 2.15.0+cu132, 8 vCPUs reserved, real FineWeb sample-10BT
+Setup: Modal container with one A100-SXM4-40GB for the repeat pairs and one A100-SXM4-80GB for the test suite
+(Modal picked the 80GB card for that job; the GPU name is in each `*env.txt`), torch 2.15.0+cu132, 8 vCPUs reserved, real FineWeb sample-10BT
 (BrahmicTokenizer-131K shards copied to local disk before the run). Each pair is
 `python -m perfkit.bench --tag <tag> --level 3 --repeat 2`, then `python -m perfkit.report <run2>.json --compare <run1>.json`;
 the `lab_small` pairs add `--config configs/lab_small.yaml`.
