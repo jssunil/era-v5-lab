@@ -1,0 +1,249 @@
++ git clone --filter=blob:none https://github.com/jssunil/era-v5-lab /root/lab
+Cloning into '/root/lab'...
++ git -C /root/lab fetch origin g6/sunil-5pct-stability
+From https://github.com/jssunil/era-v5-lab
+ * branch            g6/sunil-5pct-stability -> FETCH_HEAD
++ git -C /root/lab checkout -qf FETCH_HEAD
++ python -m perfkit.bench --tag g1_lab2_normal --level 3 --repeat 2 --config configs/lab_small.yaml
+
+[bench] repeat: g1_lab2_normal in a new process
+[bench] NVIDIA A100-SXM4-40GB | bf16 | B=32 T=512 V=131072 | modes clean,layer,trace,checkpoint,comm | level 3 | 150 steps after 10 warmup
+[bench] clean ...
+[bench] layer (level 3) ...
+[bench] trace ...
+USDT:2026-10-30 11:54:53 90:90 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-10-30 11:54:57 90:90 SyncActivityProfilerHandler.cpp:46] profiler_stop
+[bench] checkpoint ...
+
+NVIDIA A100-SXM4-40GB | bf16 | B=32 T=512 V=131072 | commit 14854097c5 | tag g1_lab2_normal
+step  median 547.70 ms  p10 532.98  p90 579.16  spread 8.4%   data 1.058 ms
+      29,914 tokens/s   MFU 3.1%   HFU 3.9%   peak mem 25.09 GB
+
+parts under the 5% rule (level <= 2), recorder overhead 0.36%
+  part                                median ms           p10..p90  % step  spread% lvl calls
+  data                                    1.125         1.06..1.27     0.2     19.3   1     1
+  fwd                                   109.529     105.22..115.03    19.4      9.0   1     1
+    fwd:embed                             4.482         4.43..4.53     0.8      2.2   2     1
+    fwd:stack                            63.879       59.63..69.31    11.3     15.2   1     1
+      fwd:block0                          6.738         6.16..7.20     1.2     15.5   2     1
+      fwd:block1                          7.133         6.52..7.95     1.3     20.0   2     1
+      fwd:block2                          7.025         6.48..7.75     1.2     18.0   2     1
+      fwd:block3                          7.035         6.46..7.65     1.2     16.9   2     1
+      fwd:block4                          7.075         6.59..7.69     1.3     15.5   2     1
+      fwd:block5                          6.942         6.38..7.63     1.2     18.0   2     1
+      fwd:block6                          6.947         6.44..7.55     1.2     16.0   2     1
+      fwd:block7                          6.946         6.39..7.53     1.2     16.3   2     1
+      fwd:block8                          6.969         6.46..7.58     1.2     16.1   2     1
+    fwd:head+loss                        40.963       40.93..41.01     7.3      0.2   2     1
+  bwd                                   269.158     252.09..293.25    47.7     15.3   1     1
+    bwd:head+loss                        48.176       48.16..48.19     8.5      0.1   2     1
+    bwd:stack                           220.420     203.42..244.54    39.0     18.7   1     1
+      bwd:block8                         25.437       23.37..27.53     4.5     16.3   2     1
+      bwd:block7                         24.394       22.76..27.10     4.3     17.8   2     1
+      bwd:block6                         24.258       22.44..27.59     4.3     21.3   2     1
+      bwd:block5                         24.015       22.28..27.67     4.3     22.4   2     1
+      bwd:block4                         24.236       22.31..27.27     4.3     20.4   2     1
+      bwd:block3                         24.026       22.24..26.72     4.3     18.6   2     1
+      bwd:block2                         23.973       22.08..26.51     4.2     18.5   2     1
+      bwd:block1                         23.879       21.87..26.56     4.2     19.6   2     1
+      bwd:block0                         23.657       21.97..27.27     4.2     22.4   2     1
+    bwd:embed                             0.520         0.49..0.55     0.1     11.5   2     1
+  opt                                   183.781     175.14..195.60    32.6     11.1   1     1
+    opt:opt.clip                          5.514         5.00..6.16     1.0     21.1   2     1
+    opt:opt.muon                        172.963     165.00..184.25    30.6     11.1   2     1
+    opt:opt.adamw                         2.626         2.29..2.82     0.5     19.9   2     1
+
+inside the blocks (information only, not gated; summed over layers), top 15:
+  opt:opt.muon.ns                                164.863 ms   29.2%
+  bwd:block*.grad                                103.684 ms   18.4%
+  bwd.recompute:block*                            73.228 ms   13.0%
+  bwd.invert:block*                               69.549 ms   12.3%
+  fwd:block*.moe.dispatch                         58.488 ms   10.4%
+  fwd:block*.moe.dispatch.expert*                 54.670 ms    9.7%
+  bwd.recompute:block*.moe.dispatch               54.359 ms    9.6%
+  bwd.invert:block*.moe.dispatch                  52.543 ms    9.3%
+  bwd.recompute:block*.moe.dispatch.expert*       50.540 ms    9.0%
+  bwd.invert:block*.moe.dispatch.expert*          48.861 ms    8.7%
+  fwd:embed.ke                                     4.433 ms    0.8%
+  fwd:block*.moe.shared                            3.282 ms    0.6%
+  fwd:block*.moe.router                            3.274 ms    0.6%
+  bwd.recompute:block*.moe.shared                  3.213 ms    0.6%
+  bwd.invert:block*.moe.shared                     3.162 ms    0.6%
+
+checkpoint save 1185.4 ms (to CPU 66.9, write 1118.9), 746.6 MB, 667 MB/s
+MoE all-to-all not measured (one GPU; run: torchrun --nproc_per_node 2 -m perfkit.bench ... --modes comm); 32.0 MB/call, 72 calls/step
+
+slowest parts (summed over layers):
+  1. opt:opt.muon.ns                             164.86 ms   30.1%  trace results/runs/g1_lab2_normal_parts/1_opt_opt.muon.ns.json
+  2. bwd:block*.grad                             103.68 ms   18.9%  trace results/runs/g1_lab2_normal_parts/2_bwd_block4.grad.json
+  3. fwd:block*.moe.dispatch                      58.49 ms   10.7%  trace results/runs/g1_lab2_normal_parts/3_fwd_block4.moe.dispatch.json
+  4. bwd.recompute:block*.moe.dispatch            54.36 ms    9.9%  trace results/runs/g1_lab2_normal_parts/4_bwd.recompute_block4.moe.dispatch.json
+  5. bwd.invert:block*.moe.dispatch               52.54 ms    9.6%  trace results/runs/g1_lab2_normal_parts/5_bwd.invert_block4.moe.dispatch.json
+GPU during clean (83 samples): util 44%  mem 30663 MiB  SM 1410 MHz  140 W  41 C
+trace: GPU busy 21.0%, 18238 kernels/step, 433 host syncs/step  ->  /root/.cache/era-perf/traces/g1_lab2_normal.json
+
+[bench] run JSON -> results/runs/g1_lab2_normal.json
+[bench] report   -> results/runs/g1_lab2_normal.md
+[warn] 27 gated part(s) have p10..p90 spread > 10%, so may miss the 5% check: data, fwd:stack, fwd:block0, fwd:block1, fwd:block2, fwd:block3 (+21 more)
+
+[bench] repeat: g1_lab2_normal-run2 in a new process
+[bench] NVIDIA A100-SXM4-40GB | bf16 | B=32 T=512 V=131072 | modes clean,layer,trace,checkpoint,comm | level 3 | 150 steps after 10 warmup
+[bench] clean ...
+[bench] layer (level 3) ...
+[bench] trace ...
+USDT:2026-10-30 12:03:28 136:136 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-10-30 12:03:31 136:136 SyncActivityProfilerHandler.cpp:46] profiler_stop
+[bench] checkpoint ...
+
+NVIDIA A100-SXM4-40GB | bf16 | B=32 T=512 V=131072 | commit 14854097c5 | tag g1_lab2_normal-run2
+step  median 560.97 ms  p10 538.62  p90 613.47  spread 13.3%   data 1.096 ms
+      29,207 tokens/s   MFU 3.0%   HFU 3.8%   peak mem 25.09 GB
+
+parts under the 5% rule (level <= 2), recorder overhead 0.61%
+  part                                median ms           p10..p90  % step  spread% lvl calls
+  data                                    1.118         1.04..1.22     0.2     16.8   1     1
+  fwd                                   108.887     105.82..113.69    19.4      7.2   1     1
+    fwd:embed                             4.481         4.43..4.53     0.8      2.2   2     1
+    fwd:stack                            63.266       60.18..67.97    11.3     12.3   1     1
+      fwd:block0                          6.598         6.21..7.11     1.2     13.6   2     1
+      fwd:block1                          7.153         6.61..7.64     1.3     14.4   2     1
+      fwd:block2                          6.947         6.51..7.51     1.2     14.3   2     1
+      fwd:block3                          6.967         6.49..7.53     1.2     15.0   2     1
+      fwd:block4                          6.994         6.57..7.66     1.2     15.7   2     1
+      fwd:block5                          6.879         6.41..7.54     1.2     16.4   2     1
+      fwd:block6                          6.983         6.57..7.63     1.2     15.2   2     1
+      fwd:block7                          6.911         6.48..7.43     1.2     13.7   2     1
+      fwd:block8                          6.864         6.39..7.49     1.2     16.0   2     1
+    fwd:head+loss                        40.966       40.94..41.01     7.3      0.2   2     1
+  bwd                                   269.007     257.10..287.45    47.9     11.3   1     1
+    bwd:head+loss                        48.172       48.16..48.19     8.6      0.1   2     1
+    bwd:stack                           220.305     208.40..238.75    39.2     13.8   1     1
+      bwd:block8                         25.267       23.97..28.19     4.5     16.7   2     1
+      bwd:block7                         24.711       23.20..26.80     4.4     14.5   2     1
+      bwd:block6                         24.595       23.08..26.69     4.4     14.7   2     1
+      bwd:block5                         24.309       22.91..26.39     4.3     14.3   2     1
+      bwd:block4                         24.193       22.75..26.44     4.3     15.3   2     1
+      bwd:block3                         24.103       22.60..26.15     4.3     14.7   2     1
+      bwd:block2                         24.091       22.61..26.30     4.3     15.3   2     1
+      bwd:block1                         23.984       22.59..26.29     4.3     15.4   2     1
+      bwd:block0                         23.852       22.48..26.41     4.2     16.5   2     1
+    bwd:embed                             0.519         0.50..0.57     0.1     13.2   2     1
+  opt                                   182.534     177.84..194.27    32.5      9.0   1     1
+    opt:opt.clip                          5.435         5.05..6.19     1.0     20.9   2     1
+    opt:opt.muon                        172.147     167.72..182.44    30.7      8.6   2     1
+    opt:opt.adamw                         2.512         2.33..2.92     0.4     23.1   2     1
+
+inside the blocks (information only, not gated; summed over layers), top 15:
+  opt:opt.muon.ns                                165.699 ms   29.5%
+  bwd:block*.grad                                102.714 ms   18.3%
+  bwd.recompute:block*                            72.484 ms   12.9%
+  bwd.invert:block*                               69.091 ms   12.3%
+  fwd:block*.moe.dispatch                         58.043 ms   10.3%
+  fwd:block*.moe.dispatch.expert*                 54.344 ms    9.7%
+  bwd.recompute:block*.moe.dispatch               54.004 ms    9.6%
+  bwd.invert:block*.moe.dispatch                  52.351 ms    9.3%
+  bwd.recompute:block*.moe.dispatch.expert*       50.333 ms    9.0%
+  bwd.invert:block*.moe.dispatch.expert*          48.745 ms    8.7%
+  fwd:embed.ke                                     4.439 ms    0.8%
+  fwd:block*.moe.router                            3.288 ms    0.6%
+  fwd:block*.moe.shared                            3.245 ms    0.6%
+  bwd.recompute:block*.moe.shared                  3.204 ms    0.6%
+  bwd.invert:block*.moe.shared                     3.153 ms    0.6%
+
+checkpoint save 1107.0 ms (to CPU 66.5, write 1040.5), 746.6 MB, 718 MB/s
+MoE all-to-all not measured (one GPU; run: torchrun --nproc_per_node 2 -m perfkit.bench ... --modes comm); 32.0 MB/call, 72 calls/step
+
+slowest parts (summed over layers):
+  1. opt:opt.muon.ns                             165.70 ms   29.5%  trace results/runs/g1_lab2_normal-run2_parts/1_opt_opt.muon.ns.json
+  2. bwd:block*.grad                             102.71 ms   18.3%  trace results/runs/g1_lab2_normal-run2_parts/2_bwd_block4.grad.json
+  3. fwd:block*.moe.dispatch                      58.04 ms   10.3%  trace results/runs/g1_lab2_normal-run2_parts/3_fwd_block4.moe.dispatch.json
+  4. bwd.recompute:block*.moe.dispatch            54.00 ms    9.6%  trace results/runs/g1_lab2_normal-run2_parts/4_bwd.recompute_block4.moe.dispatch.json
+  5. bwd.invert:block*.moe.dispatch               52.35 ms    9.3%  trace results/runs/g1_lab2_normal-run2_parts/5_bwd.invert_block4.moe.dispatch.json
+GPU during clean (86 samples): util 36%  mem 30661 MiB  SM 1410 MHz  135 W  41 C
+trace: GPU busy 21.8%, 18228 kernels/step, 433 host syncs/step  ->  /root/.cache/era-perf/traces/g1_lab2_normal-run2.json
+
+[bench] run JSON -> results/runs/g1_lab2_normal-run2.json
+[bench] report   -> results/runs/g1_lab2_normal-run2.md
+[warn] 25 gated part(s) have p10..p90 spread > 10%, so may miss the 5% check: data, fwd:stack, fwd:block0, fwd:block1, fwd:block2, fwd:block3 (+19 more)
+
+against results/runs/g1_lab2_normal.json (ms)
+5% check: step, step parts and whole blocks (level <= 2): within 5% or less than 0.05 ms apart
+  part                                  this run     against   diff ms  change          result
+  step (clean)                           560.968     547.698    13.271  2.4% slower     ok
+  data                                     1.118       1.125     0.007  0.6% faster     ok
+  fwd                                    108.887     109.529     0.643  0.6% faster     ok
+  fwd:embed                                4.481       4.482     0.002  same            ok
+  fwd:stack                               63.266      63.879     0.613  1.0% faster     ok
+  fwd:block0                               6.598       6.738     0.140  2.1% faster     ok
+  fwd:block1                               7.153       7.133     0.020  0.3% slower     ok
+  fwd:block2                               6.947       7.025     0.078  1.1% faster     ok
+  fwd:block3                               6.967       7.035     0.068  1.0% faster     ok
+  fwd:block4                               6.994       7.075     0.081  1.1% faster     ok
+  fwd:block5                               6.879       6.942     0.063  0.9% faster     ok
+  fwd:block6                               6.983       6.947     0.036  0.5% slower     ok
+  fwd:block7                               6.911       6.946     0.035  0.5% faster     ok
+  fwd:block8                               6.864       6.969     0.105  1.5% faster     ok
+  fwd:head+loss                           40.966      40.963     0.004  same            ok
+  bwd                                    269.007     269.158     0.152  0.1% faster     ok
+  bwd:head+loss                           48.172      48.176     0.004  same            ok
+  bwd:stack                              220.305     220.420     0.115  0.1% faster     ok
+  bwd:block8                              25.267      25.437     0.169  0.7% faster     ok
+  bwd:block7                              24.711      24.394     0.316  1.3% slower     ok
+  bwd:block6                              24.595      24.258     0.337  1.4% slower     ok
+  bwd:block5                              24.309      24.015     0.294  1.2% slower     ok
+  bwd:block4                              24.193      24.236     0.044  0.2% faster     ok
+  bwd:block3                              24.103      24.026     0.077  0.3% slower     ok
+  bwd:block2                              24.091      23.973     0.118  0.5% slower     ok
+  bwd:block1                              23.984      23.879     0.105  0.4% slower     ok
+  bwd:block0                              23.852      23.657     0.195  0.8% slower     ok
+  bwd:embed                                0.519       0.520     0.001  0.2% faster     ok
+  opt                                    182.534     183.781     1.247  0.7% faster     ok
+  opt:opt.clip                             5.435       5.514     0.079  1.4% faster     ok
+  opt:opt.muon                           172.147     172.963     0.816  0.5% faster     ok
+  opt:opt.adamw                            2.512       2.626     0.114  4.3% faster     ok
+  checkpoint copy (GPU to CPU)            66.534      66.874     0.340  0.5% faster     ok
+  (1 rows are information only: parts inside blocks and the checkpoint disk write, see the .md)
+  PASS: all 33 gated parts within 5% or 0.05 ms (0 by the 0.05 ms rule)
+
+[bench] repeat: 2 runs against g1_lab2_normal.json: PASS
++ python -m perfkit.report /root/lab/teams/06-performance/results/runs/g1_lab2_normal-run2.json --compare /root/lab/teams/06-performance/results/runs/g1_lab2_normal.json
+[report] render -> /root/lab/teams/06-performance/results/runs/g1_lab2_normal-run2.md
+
+[report] g1_lab2_normal-run2 vs g1_lab2_normal (ms)
+5% check: step, step parts and whole blocks (level <= 2): within 5% or less than 0.05 ms apart
+  part                              g1_lab2_normal-run2g1_lab2_normal   diff ms  change          result
+  step (clean)                           560.968     547.698    13.271  2.4% slower     ok
+  data                                     1.118       1.125     0.007  0.6% faster     ok
+  fwd                                    108.887     109.529     0.643  0.6% faster     ok
+  fwd:embed                                4.481       4.482     0.002  same            ok
+  fwd:stack                               63.266      63.879     0.613  1.0% faster     ok
+  fwd:block0                               6.598       6.738     0.140  2.1% faster     ok
+  fwd:block1                               7.153       7.133     0.020  0.3% slower     ok
+  fwd:block2                               6.947       7.025     0.078  1.1% faster     ok
+  fwd:block3                               6.967       7.035     0.068  1.0% faster     ok
+  fwd:block4                               6.994       7.075     0.081  1.1% faster     ok
+  fwd:block5                               6.879       6.942     0.063  0.9% faster     ok
+  fwd:block6                               6.983       6.947     0.036  0.5% slower     ok
+  fwd:block7                               6.911       6.946     0.035  0.5% faster     ok
+  fwd:block8                               6.864       6.969     0.105  1.5% faster     ok
+  fwd:head+loss                           40.966      40.963     0.004  same            ok
+  bwd                                    269.007     269.158     0.152  0.1% faster     ok
+  bwd:head+loss                           48.172      48.176     0.004  same            ok
+  bwd:stack                              220.305     220.420     0.115  0.1% faster     ok
+  bwd:block8                              25.267      25.437     0.169  0.7% faster     ok
+  bwd:block7                              24.711      24.394     0.316  1.3% slower     ok
+  bwd:block6                              24.595      24.258     0.337  1.4% slower     ok
+  bwd:block5                              24.309      24.015     0.294  1.2% slower     ok
+  bwd:block4                              24.193      24.236     0.044  0.2% faster     ok
+  bwd:block3                              24.103      24.026     0.077  0.3% slower     ok
+  bwd:block2                              24.091      23.973     0.118  0.5% slower     ok
+  bwd:block1                              23.984      23.879     0.105  0.4% slower     ok
+  bwd:block0                              23.852      23.657     0.195  0.8% slower     ok
+  bwd:embed                                0.519       0.520     0.001  0.2% faster     ok
+  opt                                    182.534     183.781     1.247  0.7% faster     ok
+  opt:opt.clip                             5.435       5.514     0.079  1.4% faster     ok
+  opt:opt.muon                           172.147     172.963     0.816  0.5% faster     ok
+  opt:opt.adamw                            2.512       2.626     0.114  4.3% faster     ok
+  checkpoint copy (GPU to CPU)            66.534      66.874     0.340  0.5% faster     ok
+  (464 rows are information only: parts inside blocks and the checkpoint disk write, see the .md)
+  PASS: all 33 gated parts within 5% or 0.05 ms (0 by the 0.05 ms rule)

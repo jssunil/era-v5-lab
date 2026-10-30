@@ -1,0 +1,111 @@
++ git clone --filter=blob:none https://github.com/jssunil/era-v5-lab /root/lab
+Cloning into '/root/lab'...
++ git -C /root/lab fetch origin g6/sunil-5pct-stability
+From https://github.com/jssunil/era-v5-lab
+ * branch            g6/sunil-5pct-stability -> FETCH_HEAD
++ git -C /root/lab checkout -qf FETCH_HEAD
++ python -m pytest correctness -q -rs -p no:cacheprovider --all-configs
+........................................................................ [ 22%]
+........................................................................ [ 44%]
+........................................................................ [ 66%]
+........................................................................ [ 88%]
+.......................................                                  [100%]
+=============================== warnings summary ===============================
+correctness/test_timer.py::test_recording_regions_does_not_sync_the_host
+  /usr/local/lib/python3.12/site-packages/torch/cuda/__init__.py:1502: UserWarning: Synchronization debug mode is a prototype feature and does not yet detect all synchronizing operations (Triggered internally at /__w/pytorch/pytorch/torch/csrc/cuda/Module.cpp:1081.)
+    torch._C._cuda_set_sync_debug_mode(debug_mode)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==== correctness: every pair, fast vs fp64 reference (worst relative error) ====
+used = error / tolerance. repeat = two runs of the fast code are bit-identical.
+pair                             dtype        output  used    gradient  used   repeat     result
+------------------------------------------------------------------------------------------------
+_framework.output_structure      float32    0.00e+00   <1%           -         same       PASS
+_framework.toy                   float32    0.00e+00   <1%    2.21e-08   <1%   same       PASS
+_framework.two_outputs           float32    0.00e+00   <1%    4.35e-08   <1%   same       PASS
+_framework.unused_param          float32    1.14e-08   <1%    1.19e-08   <1%   same       PASS
+
+attention.causal                 float32    3.09e-07    3%    6.00e-07   <1%   same       PASS
+attention.causal.bf16            bfloat16   5.57e-03   56%    7.46e-03   25%   same       PASS
+attention.causal.eager           float32    2.02e-07    2%    2.70e-07   <1%   same       PASS
+attention.causal.eager_bf16      bfloat16   6.58e-03   66%    8.18e-03   27%   same       PASS
+attention.causal.eager_lab       float32    2.13e-07    2%    2.78e-07   <1%   same       PASS
+attention.causal.eager_mha       float32    1.97e-07    2%    2.68e-07   <1%   same       PASS
+attention.causal.eager_mqa       float32    1.79e-07    2%    2.96e-07   <1%   same       PASS
+attention.causal.fallback        float32    3.09e-07    3%    6.00e-07   <1%   same       PASS
+attention.causal.lab             float32    3.27e-07    3%    6.51e-07   <1%   same       PASS
+attention.causal.lab_fallback    float32    3.27e-07    3%    6.51e-07   <1%   same       PASS
+attention.causal.mha             float32    3.16e-07    3%    5.90e-07   <1%   same       PASS
+attention.causal.mqa             float32    2.58e-07    3%    7.01e-07   <1%   same       PASS
+attention.causal.mqa_fallback    float32    2.58e-07    3%    7.01e-07   <1%   same       PASS
+
+ke1.cached                       float32    1.76e-07    2%    1.57e-07   <1%   same       PASS
+ke1.cached.bf16                  bfloat16   2.58e-03   26%    2.51e-03    8%   same       PASS
+ke1.cached.edge                  float32    2.23e-07    2%    9.20e-08   <1%   same       PASS
+ke1.dynamic                      float32    1.78e-07    2%    1.63e-07   <1%   same       PASS
+ke1.dynamic.bf16                 bfloat16   2.53e-03   25%    2.51e-03    8%   same       PASS
+ke1.dynamic.edge                 float32    2.59e-07    3%    1.12e-07   <1%   same       PASS
+
+ke2                              float32    5.28e-08   <1%    4.93e-08   <1%   same       PASS
+ke2.bf16                         bfloat16   5.23e-08   <1%    4.93e-08   <1%   same       PASS
+ke2.edge                         float32    7.94e-08   <1%    5.62e-08   <1%   same       PASS
+ke2.g4_table                     float32    6.25e-08   <1%    5.56e-08   <1%   same       PASS
+
+model.base                       float32    3.03e-07    3%    8.27e-07    2%   same       PASS
+model.base.attn_impl_sdpa        float32    3.03e-07    3%    9.10e-07    2%   same       PASS
+model.base.bf16                  bfloat16   2.92e-03   29%    7.82e-03   26%   same       PASS
+model.base.chunked               float32    4.55e-08   <1%    6.29e-07   <1%   same       PASS
+model.base.embedding_ke1         float32    4.07e-07    4%    8.66e-07    2%   same       PASS
+model.base.embedding_table       float32    3.22e-07    3%    8.00e-07    2%   same       PASS
+model.base.ffn_moe               float32    3.03e-07    3%    1.85e-06    4%   same       PASS
+model.base.mtp                   float32    3.03e-07    3%    8.05e-07    2%   same       PASS
+model.base.mtp.chunked           float32    1.82e-08   <1%    6.33e-07   <1%   same       PASS
+model.base.reversible_false      float32    3.06e-07    3%    7.92e-07    2%   same       PASS
+
+moe.loop                         float32    1.72e-07    2%    4.19e-07   <1%   same       PASS
+moe.loop.bf16                    bfloat16   4.86e-03   49%    5.81e-03   19%   same       PASS
+moe.loop.idle                    float32    1.71e-07    2%    3.97e-07   <1%   same       PASS
+moe.loop.top3                    float32    1.93e-07    2%    4.66e-07   <1%   same       PASS
+moe.sorted                       float32    2.30e-07    2%    3.90e-07   <1%   same       PASS
+moe.sorted.bf16                  bfloat16   4.39e-03   44%    5.81e-03   19%   same       PASS
+moe.sorted.idle                  float32    2.30e-07    2%    3.96e-07   <1%   same       PASS
+moe.sorted.top3                  float32    2.77e-07    3%    6.88e-07    1%   same       PASS
+
+reversible.mlp                   float32    3.64e-08   <1%    3.80e-07   <1%   same       PASS
+reversible.moe                   float32    3.65e-08   <1%    4.64e-07   <1%   same       PASS
+------------------------------------------------------------------------------------------------
+47 pairs: 47 PASS, 0 FAIL.   tolerance (output / gradient): float32 1e-05 / 5e-05, bfloat16 0.01 / 0.03
+327 passed, 1 warning in 78.52s (0:01:18)
++ python -m pytest correctness -q -rs -p no:cacheprovider
+........................................................................ [ 39%]
+........................................................................ [ 78%]
+.......................................                                  [100%]
+=============================== warnings summary ===============================
+correctness/test_timer.py::test_recording_regions_does_not_sync_the_host
+  /usr/local/lib/python3.12/site-packages/torch/cuda/__init__.py:1502: UserWarning: Synchronization debug mode is a prototype feature and does not yet detect all synchronizing operations (Triggered internally at /__w/pytorch/pytorch/torch/csrc/cuda/Module.cpp:1081.)
+    torch._C._cuda_set_sync_debug_mode(debug_mode)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+==== correctness: every pair, fast vs fp64 reference (worst relative error) ====
+used = error / tolerance. repeat = two runs of the fast code are bit-identical.
+pair                             dtype        output  used    gradient  used   repeat     result
+------------------------------------------------------------------------------------------------
+_framework.output_structure      float32    0.00e+00   <1%           -         same       PASS
+_framework.toy                   float32    0.00e+00   <1%    2.21e-08   <1%   same       PASS
+_framework.two_outputs           float32    0.00e+00   <1%    4.35e-08   <1%   same       PASS
+_framework.unused_param          float32    1.14e-08   <1%    1.19e-08   <1%   same       PASS
+
+attention.causal.eager_mha       float32    1.97e-07    2%    2.68e-07   <1%   same       PASS
+
+ke2                              float32    5.28e-08   <1%    4.93e-08   <1%   same       PASS
+ke2.bf16                         bfloat16   5.29e-08   <1%    4.93e-08   <1%   same       PASS
+ke2.edge                         float32    7.78e-08   <1%    5.62e-08   <1%   same       PASS
+ke2.g4_table                     float32    6.45e-08   <1%    5.56e-08   <1%   same       PASS
+
+model.base                       float32    3.03e-07    3%    8.27e-07    2%   same       PASS
+model.base.bf16                  bfloat16   2.92e-03   29%    7.82e-03   26%   same       PASS
+
+reversible.mlp                   float32    3.64e-08   <1%    3.80e-07   <1%   same       PASS
+------------------------------------------------------------------------------------------------
+12 pairs: 12 PASS, 0 FAIL.   tolerance (output / gradient): float32 1e-05 / 5e-05, bfloat16 0.01 / 0.03
+183 passed, 144 deselected, 1 warning in 44.25s

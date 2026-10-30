@@ -1,0 +1,330 @@
++ git clone --filter=blob:none https://github.com/vaibh27/era-v5-lab /root/lab
+Cloning into '/root/lab'...
+Updating files:   0% (2/397)
+Updating files:   1% (4/397)
+Updating files:   2% (8/397)
+Updating files:   3% (12/397)
+Updating files:   4% (16/397)
+Updating files:   5% (20/397)
+Updating files:   6% (24/397)
+Updating files:   7% (28/397)
+Updating files:   8% (32/397)
+Updating files:   9% (36/397)
+Updating files:  10% (40/397)
+Updating files:  11% (44/397)
+Updating files:  12% (48/397)
+Updating files:  13% (52/397)
+Updating files:  14% (56/397)
+Updating files:  15% (60/397)
+Updating files:  16% (64/397)
+Updating files:  17% (68/397)
+Updating files:  18% (72/397)
+Updating files:  19% (76/397)
+Updating files:  20% (80/397)
+Updating files:  21% (84/397)
+Updating files:  22% (88/397)
+Updating files:  23% (92/397)
+Updating files:  24% (96/397)
+Updating files:  25% (100/397)
+Updating files:  26% (104/397)
+Updating files:  27% (108/397)
+Updating files:  28% (112/397)
+Updating files:  29% (116/397)
+Updating files:  30% (120/397)
+Updating files:  31% (124/397)
+Updating files:  32% (128/397)
+Updating files:  33% (132/397)
+Updating files:  34% (135/397)
+Updating files:  35% (139/397)
+Updating files:  36% (143/397)
+Updating files:  37% (147/397)
+Updating files:  38% (151/397)
+Updating files:  39% (155/397)
+Updating files:  40% (159/397)
+Updating files:  41% (163/397)
+Updating files:  42% (167/397)
+Updating files:  43% (171/397)
+Updating files:  44% (175/397)
+Updating files:  45% (179/397)
+Updating files:  46% (183/397)
+Updating files:  47% (187/397)
+Updating files:  48% (191/397)
+Updating files:  49% (195/397)
+Updating files:  50% (199/397)
+Updating files:  51% (203/397)
+Updating files:  52% (207/397)
+Updating files:  53% (211/397)
+Updating files:  54% (215/397)
+Updating files:  55% (219/397)
+Updating files:  56% (223/397)
+Updating files:  57% (227/397)
+Updating files:  58% (231/397)
+Updating files:  59% (235/397)
+Updating files:  60% (239/397)
+Updating files:  61% (243/397)
+Updating files:  62% (247/397)
+Updating files:  63% (251/397)
+Updating files:  64% (255/397)
+Updating files:  65% (259/397)
+Updating files:  66% (263/397)
+Updating files:  67% (266/397)
+Updating files:  68% (270/397)
+Updating files:  69% (274/397)
+Updating files:  70% (278/397)
+Updating files:  71% (282/397)
+Updating files:  72% (286/397)
+Updating files:  73% (290/397)
+Updating files:  74% (294/397)
+Updating files:  75% (298/397)
+Updating files:  76% (302/397)
+Updating files:  77% (306/397)
+Updating files:  78% (310/397)
+Updating files:  79% (314/397)
+Updating files:  80% (318/397)
+Updating files:  81% (322/397)
+Updating files:  82% (326/397)
+Updating files:  83% (330/397)
+Updating files:  84% (334/397)
+Updating files:  85% (338/397)
+Updating files:  86% (342/397)
+Updating files:  87% (346/397)
+Updating files:  88% (350/397)
+Updating files:  89% (354/397)
+Updating files:  90% (358/397)
+Updating files:  91% (362/397)
+Updating files:  92% (366/397)
+Updating files:  93% (370/397)
+Updating files:  94% (374/397)
+Updating files:  95% (378/397)
+Updating files:  96% (382/397)
+Updating files:  97% (386/397)
+Updating files:  98% (390/397)
+Updating files:  99% (394/397)
+Updating files: 100% (397/397)
+Updating files: 100% (397/397), done.
++ git -C /root/lab fetch origin pull/29/head
+From https://github.com/vaibh27/era-v5-lab
+ * branch            refs/pull/29/head -> FETCH_HEAD
++ git -C /root/lab checkout -qf FETCH_HEAD
++ python -m perfkit.bench --tag pr29_a100real7_normal --level 3 --repeat 2
+
+[bench] repeat: pr29_a100real7_normal in a new process
+[bench] NVIDIA A100-SXM4-40GB | bf16 | B=16 T=256 V=131072 | modes clean,layer,trace,checkpoint,comm | level 3 | 100 steps after 10 warmup
+[bench] clean ...
+[bench] layer (level 3) ...
+[bench] trace ...
+USDT:2026-10-30 11:08:32 78:78 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-10-30 11:08:32 78:78 SyncActivityProfilerHandler.cpp:46] profiler_stop
+[bench] checkpoint ...
+
+NVIDIA A100-SXM4-40GB | bf16 | B=16 T=256 V=131072 | commit dc0b1703d7 | tag pr29_a100real7_normal
+step  median 68.20 ms  p10 66.48  p90 69.95  spread 5.1%   data 0.726 ms
+      60,059 tokens/s   MFU 4.8%   HFU 5.3%   peak mem 6.53 GB
+
+parts under the 5% rule (level <= 2), recorder overhead 2.10%
+  part                                median ms           p10..p90  % step  spread% lvl calls
+  data                                    0.767         0.68..0.89     1.1     26.1   1     1
+  fwd                                    17.458       17.20..17.76    24.8      3.2   1     1
+    fwd:embed                             0.697         0.67..0.74     1.0     10.6   2     1
+    fwd:stack                             6.164         5.95..6.47     8.8      8.5   1     1
+      fwd:block0                          1.171         1.09..1.29     1.7     16.9   2     1
+      fwd:block1                          0.949         0.92..1.05     1.3     13.1   2     1
+      fwd:block2                          0.935         0.91..0.99     1.3      9.3   2     1
+      fwd:block3                          0.921         0.90..0.99     1.3      9.4   2     1
+      fwd:block4                          0.921         0.90..0.96     1.3      6.5   2     1
+      fwd:block5                          0.919         0.89..0.98     1.3      9.2   2     1
+    fwd:head+loss                        10.437       10.43..10.45    14.8      0.2   2     1
+  bwd                                    23.365       23.34..23.39    33.2      0.2   1     1
+    bwd:head+loss                        12.279       12.27..12.29    17.5      0.2   2     1
+    bwd:stack                            10.760       10.74..10.78    15.3      0.4   1     1
+      bwd:block5                          1.780         1.77..1.78     2.5      0.6   2     1
+      bwd:block4                          1.789         1.78..1.80     2.5      0.8   2     1
+      bwd:block3                          1.783         1.78..1.79     2.5      0.5   2     1
+      bwd:block2                          1.784         1.78..1.79     2.5      0.7   2     1
+      bwd:block1                          1.790         1.79..1.80     2.5      0.6   2     1
+      bwd:block0                          1.787         1.78..1.79     2.5      0.7   2     1
+    bwd:embed                             0.316         0.31..0.32     0.4      1.3   2     1
+  opt                                    28.710       27.32..30.85    40.8     12.3   1     1
+    opt:opt.clip                          0.410         0.41..0.41     0.6      2.3   2     1
+    opt:opt.polar_muon_adamw             28.028       26.59..30.15    39.8     12.7   2     1
+    opt:opt.muon                         22.784       21.50..24.91    32.4     15.0   2     1
+    opt:opt.adamw                         5.109         4.94..5.29     7.3      6.8   2     2
+
+inside the blocks (information only, not gated; summed over layers), top 15:
+  opt:opt.muon.ns                                 25.449 ms   36.2%
+  bwd:block*.grad                                  4.917 ms    7.0%
+  bwd.recompute:block*                             3.234 ms    4.6%
+  bwd.invert:block*                                3.224 ms    4.6%
+  fwd:block*.attn.sdpa                             2.451 ms    3.5%
+  bwd.recompute:block*.attn.sdpa                   1.709 ms    2.4%
+  bwd.invert:block*.attn.sdpa                      1.709 ms    2.4%
+  fwd:block*.mlp                                   1.109 ms    1.6%
+  fwd:block*.attn.qkv                              0.905 ms    1.3%
+  fwd:block*.attn.proj                             0.664 ms    0.9%
+  fwd:embed.ke                                     0.657 ms    0.9%
+  bwd.recompute:block*.mlp                         0.507 ms    0.7%
+  bwd.invert:block*.mlp                            0.504 ms    0.7%
+  fwd:block*.ln1                                   0.316 ms    0.4%
+  fwd:block*.ln2                                   0.299 ms    0.4%
+
+checkpoint save 393.6 ms (to CPU 38.0, write 355.9), 445.1 MB, 1251 MB/s
+
+slowest parts (summed over layers):
+  1. opt:opt.polar_muon_adamw                     28.03 ms   41.1%  trace results/runs/pr29_a100real7_normal_parts/1_opt_opt.polar_muon_adamw.json
+  2. opt:opt.muon.ns                              25.45 ms   37.3%  trace results/runs/pr29_a100real7_normal_parts/2_opt_opt.muon.ns.json
+  3. bwd:head+loss                                12.28 ms   18.0%  trace results/runs/pr29_a100real7_normal_parts/3_bwd_head+loss.json
+  4. fwd:head+loss                                10.44 ms   15.3%  trace results/runs/pr29_a100real7_normal_parts/4_fwd_head+loss.json
+  5. opt:opt.adamw                                 5.11 ms    7.5%  trace results/runs/pr29_a100real7_normal_parts/5_opt_opt.adamw.json
+GPU during clean (7 samples): util 72%  mem 8105 MiB  SM 1410 MHz  147 W  35 C
+trace: GPU busy 36.3%, 3525 kernels/step, 1 host syncs/step  ->  /root/.cache/era-perf/traces/pr29_a100real7_normal.json
+
+[bench] run JSON -> results/runs/pr29_a100real7_normal.json
+[bench] report   -> results/runs/pr29_a100real7_normal.md
+[warn] recorder overhead 2.1% > 2.0%: layer numbers are flagged
+[warn] 7 gated part(s) have p10..p90 spread > 10%, so may miss the 5% check: data, fwd:embed, fwd:block0, fwd:block1, opt, opt:opt.polar_muon_adamw (+1 more)
+
+[bench] repeat: pr29_a100real7_normal-run2 in a new process
+[bench] NVIDIA A100-SXM4-40GB | bf16 | B=16 T=256 V=131072 | modes clean,layer,trace,checkpoint,comm | level 3 | 100 steps after 10 warmup
+[bench] clean ...
+[bench] layer (level 3) ...
+[bench] trace ...
+USDT:2026-10-30 11:09:27 124:124 SyncActivityProfilerHandler.cpp:39] profiler_start
+USDT:2026-10-30 11:09:27 124:124 SyncActivityProfilerHandler.cpp:46] profiler_stop
+[bench] checkpoint ...
+
+NVIDIA A100-SXM4-40GB | bf16 | B=16 T=256 V=131072 | commit dc0b1703d7 | tag pr29_a100real7_normal-run2
+step  median 68.07 ms  p10 65.94  p90 69.78  spread 5.6%   data 0.722 ms
+      60,175 tokens/s   MFU 4.8%   HFU 5.3%   peak mem 6.53 GB
+
+parts under the 5% rule (level <= 2), recorder overhead 2.08%
+  part                                median ms           p10..p90  % step  spread% lvl calls
+  data                                    0.778         0.71..0.85     1.1     17.9   1     1
+  fwd                                    17.506       17.33..17.81    24.8      2.8   1     1
+    fwd:embed                             0.705         0.68..0.74     1.0      7.9   2     1
+    fwd:stack                             6.207         6.04..6.49     8.8      7.3   1     1
+      fwd:block0                          1.183         1.14..1.24     1.7      9.0   2     1
+      fwd:block1                          0.962         0.94..1.02     1.4      9.1   2     1
+      fwd:block2                          0.943         0.92..1.02     1.3     10.6   2     1
+      fwd:block3                          0.934         0.91..0.98     1.3      7.0   2     1
+      fwd:block4                          0.933         0.90..0.97     1.3      6.9   2     1
+      fwd:block5                          0.925         0.91..0.95     1.3      4.7   2     1
+    fwd:head+loss                        10.437       10.43..10.45    14.8      0.2   2     1
+  bwd                                    23.405       23.38..23.42    33.1      0.1   1     1
+    bwd:head+loss                        12.281       12.27..12.30    17.4      0.2   2     1
+    bwd:stack                            10.794       10.78..10.81    15.3      0.2   1     1
+      bwd:block5                          1.789         1.78..1.79     2.5      0.5   2     1
+      bwd:block4                          1.795         1.79..1.80     2.5      0.6   2     1
+      bwd:block3                          1.791         1.78..1.80     2.5      0.6   2     1
+      bwd:block2                          1.787         1.78..1.79     2.5      0.7   2     1
+      bwd:block1                          1.797         1.79..1.80     2.5      0.6   2     1
+      bwd:block0                          1.791         1.79..1.80     2.5      0.6   2     1
+    bwd:embed                             0.317         0.32..0.32     0.4      1.6   2     1
+  opt                                    28.775       27.32..30.71    40.7     11.8   1     1
+    opt:opt.clip                          0.410         0.41..0.41     0.6      2.2   2     1
+    opt:opt.polar_muon_adamw             28.050       26.58..30.00    39.7     12.2   2     1
+    opt:opt.muon                         22.745       21.38..24.65    32.2     14.4   2     1
+    opt:opt.adamw                         5.161         4.96..5.27     7.3      6.0   2     2
+
+inside the blocks (information only, not gated; summed over layers), top 15:
+  opt:opt.muon.ns                                 25.444 ms   36.0%
+  bwd:block*.grad                                  4.929 ms    7.0%
+  bwd.recompute:block*                             3.242 ms    4.6%
+  bwd.invert:block*                                3.234 ms    4.6%
+  fwd:block*.attn.sdpa                             2.456 ms    3.5%
+  bwd.invert:block*.attn.sdpa                      1.713 ms    2.4%
+  bwd.recompute:block*.attn.sdpa                   1.713 ms    2.4%
+  fwd:block*.mlp                                   1.122 ms    1.6%
+  fwd:block*.attn.qkv                              0.921 ms    1.3%
+  fwd:block*.attn.proj                             0.672 ms    1.0%
+  fwd:embed.ke                                     0.658 ms    0.9%
+  bwd.recompute:block*.mlp                         0.511 ms    0.7%
+  bwd.invert:block*.mlp                            0.504 ms    0.7%
+  fwd:block*.ln1                                   0.324 ms    0.5%
+  fwd:block*.ln2                                   0.305 ms    0.4%
+
+checkpoint save 364.6 ms (to CPU 37.9, write 326.7), 445.1 MB, 1362 MB/s
+
+slowest parts (summed over layers):
+  1. opt:opt.polar_muon_adamw                     28.05 ms   41.2%  trace results/runs/pr29_a100real7_normal-run2_parts/1_opt_opt.polar_muon_adamw.json
+  2. opt:opt.muon.ns                              25.44 ms   37.4%  trace results/runs/pr29_a100real7_normal-run2_parts/2_opt_opt.muon.ns.json
+  3. bwd:head+loss                                12.28 ms   18.0%  trace results/runs/pr29_a100real7_normal-run2_parts/3_bwd_head+loss.json
+  4. fwd:head+loss                                10.44 ms   15.3%  trace results/runs/pr29_a100real7_normal-run2_parts/4_fwd_head+loss.json
+  5. opt:opt.adamw                                 5.16 ms    7.6%  trace results/runs/pr29_a100real7_normal-run2_parts/5_opt_opt.adamw.json
+GPU during clean (7 samples): util 72%  mem 8105 MiB  SM 1410 MHz  189 W  37 C
+trace: GPU busy 35.5%, 3525 kernels/step, 1 host syncs/step  ->  /root/.cache/era-perf/traces/pr29_a100real7_normal-run2.json
+
+[bench] run JSON -> results/runs/pr29_a100real7_normal-run2.json
+[bench] report   -> results/runs/pr29_a100real7_normal-run2.md
+[warn] recorder overhead 2.1% > 2.0%: layer numbers are flagged
+[warn] 5 gated part(s) have p10..p90 spread > 10%, so may miss the 5% check: data, fwd:block2, opt, opt:opt.polar_muon_adamw, opt:opt.muon
+
+against results/runs/pr29_a100real7_normal.json (ms)
+5% check: step, step parts and whole blocks (level <= 2): within 5% or less than 0.05 ms apart
+  part                                  this run     against   diff ms  change          result
+  step (clean)                            68.068      68.200     0.132  0.2% faster     ok
+  data                                     0.778       0.767     0.011  1.4% slower     ok
+  fwd                                     17.506      17.458     0.049  0.3% slower     ok
+  fwd:embed                                0.705       0.697     0.008  1.1% slower     ok
+  fwd:stack                                6.207       6.164     0.042  0.7% slower     ok
+  fwd:block0                               1.183       1.171     0.012  1.0% slower     ok
+  fwd:block1                               0.962       0.949     0.012  1.3% slower     ok
+  fwd:block2                               0.943       0.935     0.008  0.9% slower     ok
+  fwd:block3                               0.934       0.921     0.013  1.4% slower     ok
+  fwd:block4                               0.933       0.921     0.012  1.3% slower     ok
+  fwd:block5                               0.925       0.919     0.006  0.6% slower     ok
+  fwd:head+loss                           10.437      10.437     0.000  same            ok
+  bwd                                     23.405      23.365     0.039  0.2% slower     ok
+  bwd:head+loss                           12.281      12.279     0.003  same            ok
+  bwd:stack                               10.794      10.760     0.034  0.3% slower     ok
+  bwd:block5                               1.789       1.780     0.009  0.5% slower     ok
+  bwd:block4                               1.795       1.789     0.006  0.3% slower     ok
+  bwd:block3                               1.791       1.783     0.008  0.5% slower     ok
+  bwd:block2                               1.787       1.784     0.003  0.2% slower     ok
+  bwd:block1                               1.797       1.790     0.007  0.4% slower     ok
+  bwd:block0                               1.791       1.787     0.004  0.2% slower     ok
+  bwd:embed                                0.317       0.316     0.001  0.3% slower     ok
+  opt                                     28.775      28.710     0.065  0.2% slower     ok
+  opt:opt.clip                             0.410       0.410     0.001  0.1% slower     ok
+  opt:opt.polar_muon_adamw                28.050      28.028     0.022  0.1% slower     ok
+  opt:opt.muon                            22.745      22.784     0.039  0.2% faster     ok
+  opt:opt.adamw                            5.161       5.109     0.052  1.0% slower     ok
+  checkpoint save                        364.613     393.634    29.021  7.4% faster     OUTSIDE
+  FAIL: 1 of 28 gated parts outside 5% and 0.05 ms, or missing
+
+[bench] repeat: 2 runs against pr29_a100real7_normal.json: FAIL
++ python -m perfkit.report /root/lab/teams/06-performance/results/runs/pr29_a100real7_normal-run2.json --compare /root/lab/teams/06-performance/results/runs/pr29_a100real7_normal.json
+[report] render -> /root/lab/teams/06-performance/results/runs/pr29_a100real7_normal-run2.md
+
+[report] pr29_a100real7_normal-run2 vs pr29_a100real7_normal (ms)
+5% check: step, step parts and whole blocks (level <= 2): within 5% or less than 0.05 ms apart
+  part                              pr29_a100real7_normal-run2pr29_a100real7_normal   diff ms  change          result
+  step (clean)                            68.068      68.200     0.132  0.2% faster     ok
+  data                                     0.778       0.767     0.011  1.4% slower     ok
+  fwd                                     17.506      17.458     0.049  0.3% slower     ok
+  fwd:embed                                0.705       0.697     0.008  1.1% slower     ok
+  fwd:stack                                6.207       6.164     0.042  0.7% slower     ok
+  fwd:block0                               1.183       1.171     0.012  1.0% slower     ok
+  fwd:block1                               0.962       0.949     0.012  1.3% slower     ok
+  fwd:block2                               0.943       0.935     0.008  0.9% slower     ok
+  fwd:block3                               0.934       0.921     0.013  1.4% slower     ok
+  fwd:block4                               0.933       0.921     0.012  1.3% slower     ok
+  fwd:block5                               0.925       0.919     0.006  0.6% slower     ok
+  fwd:head+loss                           10.437      10.437     0.000  same            ok
+  bwd                                     23.405      23.365     0.039  0.2% slower     ok
+  bwd:head+loss                           12.281      12.279     0.003  same            ok
+  bwd:stack                               10.794      10.760     0.034  0.3% slower     ok
+  bwd:block5                               1.789       1.780     0.009  0.5% slower     ok
+  bwd:block4                               1.795       1.789     0.006  0.3% slower     ok
+  bwd:block3                               1.791       1.783     0.008  0.5% slower     ok
+  bwd:block2                               1.787       1.784     0.003  0.2% slower     ok
+  bwd:block1                               1.797       1.790     0.007  0.4% slower     ok
+  bwd:block0                               1.791       1.787     0.004  0.2% slower     ok
+  bwd:embed                                0.317       0.316     0.001  0.3% slower     ok
+  opt                                     28.775      28.710     0.065  0.2% slower     ok
+  opt:opt.clip                             0.410       0.410     0.001  0.1% slower     ok
+  opt:opt.polar_muon_adamw                28.050      28.028     0.022  0.1% slower     ok
+  opt:opt.muon                            22.745      22.784     0.039  0.2% faster     ok
+  opt:opt.adamw                            5.161       5.109     0.052  1.0% slower     ok
+  checkpoint save                        364.613     393.634    29.021  7.4% faster     OUTSIDE
+  (130 parts inside blocks: information only, see the .md)
+  FAIL: 1 of 28 gated parts outside 5% and 0.05 ms, or missing

@@ -1,0 +1,15 @@
+commit dc0b1703d7d0c51b152bd37d81f6fc2b3ddcf64d
+GPU 0: NVIDIA A100-SXM4-40GB (UUID: GPU-1a97cd95-f611-efc2-2149-d8d2519233f2)
+[4mGPU0	CPU Affinity	NUMA Affinity	GPU NUMA ID[0m
+GPU0	 X 				N/A
+
+Legend:
+
+  X    = Self
+  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+  PIX  = Connection traversing at most a single PCIe bridge
+  NV#  = Connection traversing a bonded set of # NVLinks
+torch 2.15.0+cu132 13.2 1 GPUs
