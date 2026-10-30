@@ -1,6 +1,6 @@
 # Medicine sheet: sci-finepdfs (jssunil)
 
-Written from my reading of the first 500 documents of the pack (`sci-finepdfs.parquet`) and the label sheet `labels.csv`, following the disease codes of `diagnosis/DISEASES.md`. Every number below comes from a harm-test script that I ran locally (it is not part of this PR) on the code blocks in this file, with `labels.csv` as the truth.
+Written from my reading of the first 500 documents of the pack (`sci-finepdfs.parquet`) and the label sheet `labels.csv`, following the disease codes of `diagnosis/DISEASES.md`. Every number below comes from a harm-test script I ran locally (it is not part of this PR), on the code in this file and on `labels.csv` as the truth.
 
 Diseases found across the 500 documents (a document can have several):
 - **B4 (placeholders and converter junk in prose):** 132 documents
@@ -8,19 +8,19 @@ Diseases found across the 500 documents (a document can have several):
 - **F1 (personal data of private people):** 56 documents
 - **B2 (HTML tags `<sup>`, `<sub>`, `<br>`):** 15 documents
 - **C4 (two documents joined):** 16 documents
-- **C3 (truncated document):** 16 documents
+- **C3 (truncated document):** 17 documents
 - **C2 (repeated passages):** 16 documents
 - **A6 (mixed script inside a word):** 6 documents
 - **D1 (wrong language label):** 7 documents
 - Seen five times or fewer, so no medicine: D3 (3), B5 (3), C5 (4), D4 (2), D5 (1), A1 (1), F3 (1)
 
-Reading: 453 documents read in full, 47 read in part (start, end and a scan; for these I do not judge D4 or D5). 7 partial rows are marked `clean` and say so in the note (PROVISIONAL): they are 49-164k characters each and still need a full read before they can count as clean.
+Reading: 453 documents read in full, 47 read in part (start, end and a scan; for these I do not judge D4 or D5). 6 partial rows are marked `clean`: they are 49-149k characters each, I scanned the whole text (repeats, odd characters, markup, placeholders, cut-off end) and read the start, the end and the flagged spots, but not every line. The note column says so, and they are not counted as full reads.
 Verdicts:
-- `clean`: 242 documents (48.4%)
-- `fix`: 231 documents (46.2%)
+- `clean`: 241 documents (48.2%)
+- `fix`: 232 documents (46.4%)
 - `drop`: 27 documents (5.4%)
 
-Gate 1: the gold set for this pack is 47 documents, so a single changed document is 2.1% and fails the 1% gate; every medicine below changes none. The gold set is an interim one that I built locally and did not commit; I will rerun the harm test on the final gold set when Data A publishes it.
+Gate 1: the harm base here is an interim gold set of 47 documents that I built locally from the three readers' sheets (not committed). With a set this small, TSAI's rule for small gold sets applies: a rule passes if it changes at most 1 document or 1% of the gold set, whichever is larger. Every medicine below changes 0 gold documents. I will rerun the test on Data A's published gold set and replace these numbers; if that set is empty, this file will say "gold set empty, not testable".
 
 ## Observations
 
@@ -96,7 +96,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 54 of 500 documents (10.8%); 44 were labelled `C1`, 10 changed without that label.
      - Removes 0.311% of all characters; the worst single document loses 7.4%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 1 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 72 of the 116 labelled documents unchanged.
 
@@ -142,7 +142,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 74 of 500 documents (14.8%); 46 were labelled `F1`, 28 changed without that label.
      - Removes 0.008% of all characters; the worst single document loses 0.8%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 11 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 10 of the 56 labelled documents unchanged.
 
@@ -185,7 +185,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 121 of 500 documents (24.2%); 120 were labelled `B4`, 1 changed without that label.
      - Removes 0.041% of all characters; the worst single document loses 8.9%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 12 of the 132 labelled documents unchanged.
 
@@ -197,7 +197,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
 
 ## Medicine 4: C3 Truncated Documents (Broken Trailing Tables & Mid-Phrase Cutoffs)
 
-1. **Disease:** C3, found in 16 of the 500 documents.
+1. **Disease:** C3, found in 17 of the 500 documents.
    Examples:
    - `51a4fb599da754db` (row 30): `starts mid-sentence 'langue, il est normal que nous rete' @0`
    - `6acc7c94105bdebd` (row 32): `cut off mid-phrase on 'such as the' @9437`
@@ -301,12 +301,12 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 5 of 500 documents (1.0%); 5 were labelled `C3`, 0 changed without that label.
      - Removes 0.003% of all characters; the worst single document loses 1.4%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
-     - Leaves 11 of the 16 labelled documents unchanged.
+     - Leaves 12 of the 17 labelled documents unchanged.
 
 5. **The side effects:**
-   - Removes the last partial table row or the dangling phrase when the text is cut off at the end of the PDF. Recall is low: 5 of 16; the other C3 documents are short stubs or cut mid-document, with no common pattern.
+   - Removes the last partial table row or the dangling phrase when the text is cut off at the end of the PDF. Recall is low: 5 of 17; the other C3 documents are short stubs or cut mid-document, with no common pattern.
 
 ---
 
@@ -342,7 +342,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 14 of 500 documents (2.8%); 14 were labelled `B2`, 0 changed without that label.
      - Removes 0.005% of all characters; the worst single document loses 1.1%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 1 of the 15 labelled documents unchanged.
 
@@ -387,7 +387,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 6 of 500 documents (1.2%); 6 were labelled `A6`, 0 changed without that label.
      - Removes 0.000% of all characters; the worst single document loses 0.2%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 0 of the 6 labelled documents unchanged.
 
@@ -543,7 +543,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 6 of 500 documents (1.2%); 2 were labelled `D1`, 4 changed without that label.
      - Removes 0.445% of all characters; the worst single document loses 26.4%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 5 of the 7 labelled documents unchanged.
 
@@ -616,7 +616,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 2 of 500 documents (0.4%); 2 were labelled `C4`, 0 changed without that label.
      - Removes 0.015% of all characters; the worst single document loses 24.7%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 14 of the 16 labelled documents unchanged.
 
@@ -678,7 +678,7 @@ Gate 1: the gold set for this pack is 47 documents, so a single changed document
    - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
      - Changes 17 of 500 documents (3.4%); 4 were labelled `C2`, 13 changed without that label.
      - Removes 0.213% of all characters; the worst single document loses 15.9%.
-     - Changes **0 of 47** gold documents (0.00%); gate (<= 1%): **PASS**.
+     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 1 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 12 of the 16 labelled documents unchanged.
 
