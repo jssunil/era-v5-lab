@@ -20,7 +20,7 @@ Verdicts:
 - `fix`: 232 documents (46.4%)
 - `drop`: 27 documents (5.4%)
 
-Gate 1: the harm base here is an interim gold set of 47 documents that I built locally from the three readers' sheets (not committed). With a set this small, TSAI's rule for small gold sets applies: a rule passes if it changes at most 1 document or 1% of the gold set, whichever is larger. Every medicine below changes 0 gold documents. I will rerun the test on Data A's published gold set and replace these numbers; if that set is empty, this file will say "gold set empty, not testable".
+Gate 1: the harm base is the published Data A gold set, `teams/01-data-a/gold/sci-finepdfs_gold.csv` on `patilvijay23/era-v5-lab@g1-harm-test` (posted 31 Oct, 17:24 IST; PR #140 will move it onto `main` at the same path): 40 documents, each read in full and marked clean by two readers of this pack (jssunil + patilvijay23, or aneeshads + jssunil). Below the 200 target, so TSAI's rule for small gold sets applies: a rule passes if it changes at most 1 document or 1% of the gold set, whichever is larger (here, 1 document = 2.5%). Every medicine below changes 0 of the 40 gold documents: all 9 PASS.
 
 ## Observations
 
@@ -93,10 +93,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 54 of 500 documents (10.8%); 44 were labelled `C1`, 10 changed without that label.
      - Removes 0.311% of all characters; the worst single document loses 7.4%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 1 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 72 of the 116 labelled documents unchanged.
 
@@ -139,10 +139,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 74 of 500 documents (14.8%); 46 were labelled `F1`, 28 changed without that label.
      - Removes 0.008% of all characters; the worst single document loses 0.8%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 11 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 10 of the 56 labelled documents unchanged.
 
@@ -182,10 +182,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 121 of 500 documents (24.2%); 120 were labelled `B4`, 1 changed without that label.
      - Removes 0.041% of all characters; the worst single document loses 8.9%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 12 of the 132 labelled documents unchanged.
 
@@ -298,10 +298,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 5 of 500 documents (1.0%); 5 were labelled `C3`, 0 changed without that label.
      - Removes 0.003% of all characters; the worst single document loses 1.4%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 12 of the 17 labelled documents unchanged.
 
@@ -339,10 +339,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 14 of 500 documents (2.8%); 14 were labelled `B2`, 0 changed without that label.
      - Removes 0.005% of all characters; the worst single document loses 1.1%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 1 of the 15 labelled documents unchanged.
 
@@ -384,10 +384,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 6 of 500 documents (1.2%); 6 were labelled `A6`, 0 changed without that label.
      - Removes 0.000% of all characters; the worst single document loses 0.2%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 0 of the 6 labelled documents unchanged.
 
@@ -540,10 +540,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 6 of 500 documents (1.2%); 2 were labelled `D1`, 4 changed without that label.
      - Removes 0.445% of all characters; the worst single document loses 26.4%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 5 of the 7 labelled documents unchanged.
 
@@ -613,10 +613,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 3. **The action:** `fix` the text.
 
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 2 of 500 documents (0.4%); 2 were labelled `C4`, 0 changed without that label.
      - Removes 0.015% of all characters; the worst single document loses 24.7%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 0 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 14 of the 16 labelled documents unchanged.
 
@@ -675,10 +675,10 @@ Gate 1: the harm base here is an interim gold set of 47 documents that I built l
 
 3. **The action:** `fix` the text.
 4. **The harm test:**
-   - Measured by my local harm-test script on 500 documents; harm base: sci-finepdfs_gold.csv, rebuilt on 30 Oct from the labels of the 3 readers of this pack (jssunil, patilvijay23, aneeshads) with the Data A rule (two readers read the document in full and marked it clean, nobody marked fix or drop): 47 documents, below the 200 target, so one changed document is 2.1%.
+   - Measured by my local harm-test script on 500 documents; harm base: the published Data A gold set `teams/01-data-a/gold/sci-finepdfs_gold.csv` (`patilvijay23/era-v5-lab@g1-harm-test`, posted 31 Oct): 40 documents, two readers per document, below the 200 target, so one changed document is 2.5%.
      - Changes 17 of 500 documents (3.4%); 4 were labelled `C2`, 13 changed without that label.
      - Removes 0.213% of all characters; the worst single document loses 15.9%.
-     - Changes **0 of 47** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
+     - Changes **0 of 40** gold documents (0.00%); gate (at most 1 document or 1%): **PASS**.
      - Changes 1 of the 235 documents that the reader read in full and marked clean (the gold set is a subset of these).
      - Leaves 12 of the 16 labelled documents unchanged.
 
