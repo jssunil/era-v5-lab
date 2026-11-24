@@ -1,0 +1,53 @@
+name: g10-ts-verify
+
+# Verification run for the G10 jsts TypeScript sandbox on Linux/amd64 (standard Docker, not part of any PR):
+# build the image, check every TS reference scores 1 and every stub 0, then run the jsts test suite.
+on:
+  push:
+    branches: [g10-ts-verify-ci]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Environment
+        run: |
+          uname -srm
+          . /etc/os-release && echo "$PRETTY_NAME"
+          docker version --format 'docker client {{.Client.Version}} / server {{.Server.Version}} {{.Server.Arch}}'
+          docker info --format 'security: {{.SecurityOptions}}  runtime: {{.DefaultRuntime}}  cgroup: {{.CgroupVersion}}'
+          python --version
+
+      - name: Install pytest
+        run: pip install -q pytest
+
+      - name: Build the sandbox image (linux/amd64)
+        run: |
+          docker build --platform linux/amd64 -f teams/10-post-training/rl/jsts/jsts.Dockerfile -t g10-jsts-rl:1 \
+            teams/10-post-training/rl/jsts
+          docker image inspect g10-jsts-rl:1 --format 'image {{.Id}} {{.Architecture}}'
+
+      - name: Container starts with the verifier's DOCKER_LIMITS
+        run: |
+          docker run --rm --network=none --memory=1g --cpus=2 --pids-limit=256 --user=0:0 --cap-drop=ALL \
+            --cap-add=SETUID --cap-add=SETGID --cap-add=CHOWN --cap-add=DAC_OVERRIDE \
+            --security-opt=no-new-privileges g10-jsts-rl:1 bash -c 'node -v'
+
+      - name: reward.py --check-all --type ts
+        run: |
+          python teams/10-post-training/rl/reward.py --check-all --type ts | tee checkall_ts.jsonl
+          tail -1 checkall_ts.jsonl | python -c "import json,sys; d=json.load(sys.stdin); print(d); sys.exit(1 if d['wrong'] else 0)"
+
+      - name: pytest teams/10-post-training/rl/jsts/
+        run: python -m pytest teams/10-post-training/rl/jsts/ -q -p no:cacheprovider -rs
